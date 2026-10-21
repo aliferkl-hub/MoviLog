@@ -2,7 +2,7 @@ export interface User {
   id: string;
   email: string;
   name: string;
-  role: 'master_owner' | 'company_admin' | 'dispatcher' | 'driver' | 'operator' | 'concierge' | 'viewer';
+  role: 'master_owner' | 'company_admin' | 'dispatcher' | 'driver' | 'operator' | 'concierge' | 'financial' | 'client' | 'viewer';
   companyId: string | null;
   phone?: string;
 }
@@ -418,4 +418,126 @@ export interface DashboardMetrics {
     timeline: TimelineDataPoint[];
   };
   totalDatabasePackages: number;
+}
+
+export interface FiscalConfig {
+  id: string;
+  companyId: string;
+  cnpj: string;
+  razaoSocial: string;
+  nomeFantasia: string;
+  inscricaoEstadual: string;
+  inscricaoMunicipal: string;
+  regimeTributario: 'simples_nacional' | 'lucro_presumido' | 'lucro_real';
+  cnaePrincipal?: string;
+  enderecoFiscal: string;
+  numero: string;
+  bairro: string;
+  cidade: string;
+  uf: string;
+  cep: string;
+  ambiente: 'homologacao' | 'producao';
+  serieNFe: number;
+  proximoNumeroNFe: number;
+  serieCTe: number;
+  proximoNumeroCTe: number;
+  serieMDFe: number;
+  proximoNumeroMDFe: number;
+  serieNFSe: number;
+  proximoNumeroNFSe: number;
+  certificadoStatus: 'valido' | 'pendente' | 'vencido';
+  certificadoValidade?: string;
+  provedorIntegracao: 'simulador_homologacao' | 'focus_nfe' | 'nuvem_fiscal' | 'sefaz_direta';
+  apiKeyProvedor?: string;
+  atualizadoEm: string;
+}
+
+export interface FiscalItem {
+  itemNumero: number;
+  descricao: string;
+  ncm: string;
+  cfop: string;
+  quantidade: number;
+  unidadeMedida: string;
+  valorUnitario: number;
+  valorTotal: number;
+  aliquotaICMS: number;
+  valorICMS: number;
+}
+
+export interface FiscalDocument {
+  id: string;
+  companyId: string;
+  tipo: 'nfe' | 'nfce' | 'nfse' | 'cte' | 'mdfe';
+  numero: number;
+  serie: number;
+  chaveAcesso: string;
+  status: 'autorizado' | 'rejeitado' | 'cancelado' | 'contingencia' | 'processando';
+  dataEmissao: string;
+  protocoloAutorizacao: string;
+  ambiente: 'homologacao' | 'producao';
+  emitenteCNPJ: string;
+  emitenteRazao: string;
+  emitenteUF: string;
+  destinatarioNome: string;
+  destinatarioDocumento: string;
+  destinatarioEndereco: string;
+  destinatarioCidade: string;
+  destinatarioUF: string;
+  destinatarioCEP: string;
+  naturezaOperacao: string;
+  cfop: string;
+  itens: FiscalItem[];
+  valorTotalProdutos: number;
+  valorFrete: number;
+  valorSeguro: number;
+  valorOutros: number;
+  baseCalculoICMS: number;
+  valorICMS: number;
+  baseCalculoISS?: number;
+  valorISS?: number;
+  valorTotal: number;
+  deliveryId?: string;
+  shipmentId?: string;
+  xmlConteudo: string;
+  motivoCancelamento?: string;
+  eventos: {
+    id: string;
+    tipo: 'autorizacao' | 'cancelamento' | 'carta_correcao';
+    dataHora: string;
+    protocolo: string;
+    motivo: string;
+    usuario: string;
+  }[];
+  criadoEm: string;
+}
+
+export interface FinancialRecord {
+  id: string;
+  companyId: string;
+  tipo: 'receita' | 'despesa';
+  categoria: 'frete' | 'combustivel' | 'manutencao' | 'pedagio' | 'salario' | 'seguro' | 'aluguel_armazem' | 'outros';
+  descricao: string;
+  valor: number;
+  dataCompetencia: string;
+  status: 'pendente' | 'pago' | 'conciliado';
+  routeId?: string;
+  vehicleId?: string;
+  deliveryId?: string;
+  fiscalDocId?: string;
+  comprovanteRef?: string;
+  observacoes?: string;
+  criadoEm: string;
+}
+
+export interface NotificationItem {
+  id: string;
+  companyId?: string | null;
+  tipo: 'entrega' | 'fiscal' | 'frota' | 'portaria' | 'sistema';
+  titulo: string;
+  mensagem: string;
+  lida: boolean;
+  prioridade: 'baixa' | 'media' | 'alta' | 'urgente';
+  link?: string;
+  dataHora: string;
 }

@@ -21,7 +21,13 @@ import {
   Menu,
   X,
   UserCheck,
-  Sparkles
+  Sparkles,
+  FileText,
+  Boxes,
+  Send,
+  DollarSign,
+  QrCode,
+  UserPlus
 } from 'lucide-react';
 
 export interface TheXLogSidebarProps {
@@ -30,6 +36,7 @@ export interface TheXLogSidebarProps {
   onNavigate: (module: string, view?: string) => void;
   mobileOpen: boolean;
   setMobileOpen: (open: boolean) => void;
+  onOpenPublicTrack?: () => void;
 }
 
 export const TheXLogSidebar: React.FC<TheXLogSidebarProps> = ({
@@ -37,29 +44,34 @@ export const TheXLogSidebar: React.FC<TheXLogSidebarProps> = ({
   activeView,
   onNavigate,
   mobileOpen,
-  setMobileOpen
+  setMobileOpen,
+  onOpenPublicTrack
 }) => {
   const { user, company, isMaster, logout } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
 
   const role = user?.role || 'driver';
 
-  // Navigation Items according to Specification 4
   const navSections = [
     {
-      title: 'Operacional',
+      title: 'Principal',
       items: [
         {
           id: 'overview',
-          label: 'Visão Geral',
+          label: 'Painel MoviLog',
           icon: LayoutDashboard,
-          allowedRoles: ['master_owner', 'company_admin', 'dispatcher', 'operator'],
+          allowedRoles: ['master_owner', 'company_admin', 'dispatcher', 'operator', 'financial'],
           module: 'dashboard',
           view: 'overview'
-        },
+        }
+      ]
+    },
+    {
+      title: 'Operações de Transporte',
+      items: [
         {
           id: 'deliveries',
-          label: 'Entregas',
+          label: 'Gestão de Entregas',
           icon: Package,
           allowedRoles: ['master_owner', 'company_admin', 'dispatcher'],
           module: 'routing',
@@ -67,7 +79,7 @@ export const TheXLogSidebar: React.FC<TheXLogSidebarProps> = ({
         },
         {
           id: 'import',
-          label: 'Importação de Planilhas',
+          label: 'Importar Planilhas',
           icon: FileSpreadsheet,
           allowedRoles: ['master_owner', 'company_admin', 'dispatcher'],
           module: 'routing',
@@ -75,7 +87,7 @@ export const TheXLogSidebar: React.FC<TheXLogSidebarProps> = ({
         },
         {
           id: 'routes',
-          label: 'Planejamento de Rotas',
+          label: 'Roteirizador & Otimização',
           icon: Navigation,
           allowedRoles: ['master_owner', 'company_admin', 'dispatcher'],
           module: 'routing',
@@ -92,81 +104,52 @@ export const TheXLogSidebar: React.FC<TheXLogSidebarProps> = ({
       ]
     },
     {
-      title: 'Frota & Rastreamento',
+      title: 'Armazém & Cadeia de Custódia',
       items: [
         {
-          id: 'gps',
-          label: 'Rastreamento GPS',
+          id: 'receipts',
+          label: 'Recebimento & QR Code',
+          icon: Truck,
+          allowedRoles: ['master_owner', 'company_admin', 'operator', 'dispatcher'],
+          module: 'logistica',
+          view: 'receipts'
+        },
+        {
+          id: 'inventory',
+          label: 'Estoque & Posições',
+          icon: Boxes,
+          allowedRoles: ['master_owner', 'company_admin', 'operator', 'dispatcher'],
+          module: 'logistica',
+          view: 'inventory'
+        },
+        {
+          id: 'shipments',
+          label: 'Expedição & Despacho',
+          icon: Send,
+          allowedRoles: ['master_owner', 'company_admin', 'operator', 'dispatcher'],
+          module: 'logistica',
+          view: 'shipments'
+        }
+      ]
+    },
+    {
+      title: 'Frota & Telemetria',
+      items: [
+        {
+          id: 'fleet',
+          label: 'Veículos & Rastreamento GPS',
           icon: Radio,
           allowedRoles: ['master_owner', 'company_admin', 'dispatcher'],
           module: 'routing',
           view: 'fleet'
         },
         {
-          id: 'fleet',
-          label: 'Frota e Veículos',
-          icon: Truck,
-          allowedRoles: ['master_owner', 'company_admin', 'dispatcher'],
-          module: 'routing',
-          view: 'fleet'
-        },
-        {
           id: 'drivers',
-          label: 'Motoristas & Entregadores',
+          label: 'Motoristas & Condutores',
           icon: Users,
           allowedRoles: ['master_owner', 'company_admin', 'dispatcher'],
           module: 'routing',
           view: 'drivers'
-        }
-      ]
-    },
-    {
-      title: 'Controle & Qualidade',
-      items: [
-        {
-          id: 'clients',
-          label: 'Clientes e Destinatários',
-          icon: Users,
-          allowedRoles: ['master_owner', 'company_admin', 'dispatcher'],
-          module: 'routing',
-          view: 'clients'
-        },
-        {
-          id: 'pod',
-          label: 'Comprovantes de Entrega',
-          icon: FileCheck,
-          allowedRoles: ['master_owner', 'company_admin', 'dispatcher', 'driver'],
-          module: 'routing',
-          view: 'pod'
-        },
-        {
-          id: 'occurrences',
-          label: 'Ocorrências / Insucessos',
-          icon: AlertTriangle,
-          allowedRoles: ['master_owner', 'company_admin', 'dispatcher'],
-          module: 'routing',
-          view: 'occurrences'
-        },
-        {
-          id: 'reports',
-          label: 'Relatórios Gerenciais',
-          icon: BarChart3,
-          allowedRoles: ['master_owner', 'company_admin', 'dispatcher'],
-          module: 'routing',
-          view: 'reports'
-        }
-      ]
-    },
-    {
-      title: 'Módulos Especiais',
-      items: [
-        {
-          id: 'condo',
-          label: 'Gestão Predial (Portaria)',
-          icon: Building,
-          allowedRoles: ['master_owner', 'company_admin', 'operator'],
-          module: 'predial',
-          view: 'packages'
         },
         {
           id: 'driver_panel',
@@ -179,13 +162,105 @@ export const TheXLogSidebar: React.FC<TheXLogSidebarProps> = ({
       ]
     },
     {
-      title: 'Administração',
+      title: 'Central Fiscal',
+      items: [
+        {
+          id: 'fiscal_docs',
+          label: 'Documentos NF-e / CT-e',
+          icon: FileText,
+          allowedRoles: ['master_owner', 'company_admin', 'dispatcher', 'financial'],
+          module: 'fiscal',
+          view: 'documents'
+        }
+      ]
+    },
+    {
+      title: 'Controle & Qualidade',
+      items: [
+        {
+          id: 'pod',
+          label: 'Comprovantes de Entrega (POD)',
+          icon: FileCheck,
+          allowedRoles: ['master_owner', 'company_admin', 'dispatcher', 'driver'],
+          module: 'routing',
+          view: 'pod'
+        },
+        {
+          id: 'occurrences',
+          label: 'Ocorrências & Insucessos',
+          icon: AlertTriangle,
+          allowedRoles: ['master_owner', 'company_admin', 'dispatcher'],
+          module: 'routing',
+          view: 'occurrences'
+        },
+        {
+          id: 'clients',
+          label: 'Destinatários & Clientes',
+          icon: Users,
+          allowedRoles: ['master_owner', 'company_admin', 'dispatcher'],
+          module: 'routing',
+          view: 'clients'
+        }
+      ]
+    },
+    {
+      title: 'Gestão Predial & Portaria',
+      items: [
+        {
+          id: 'packages',
+          label: 'Encomendas & PIN Seguro',
+          icon: Package,
+          allowedRoles: ['master_owner', 'company_admin', 'operator', 'concierge'],
+          module: 'predial',
+          view: 'packages'
+        },
+        {
+          id: 'visitors',
+          label: 'Visitantes & Acessos',
+          icon: UserPlus,
+          allowedRoles: ['master_owner', 'company_admin', 'operator', 'concierge'],
+          module: 'predial',
+          view: 'visitors'
+        },
+        {
+          id: 'units',
+          label: 'Unidades & Moradores',
+          icon: Building,
+          allowedRoles: ['master_owner', 'company_admin', 'operator', 'concierge'],
+          module: 'predial',
+          view: 'units'
+        }
+      ]
+    },
+    {
+      title: 'Gestão Financeira',
+      items: [
+        {
+          id: 'financial',
+          label: 'Custos & Faturamento',
+          icon: DollarSign,
+          allowedRoles: ['master_owner', 'company_admin', 'financial'],
+          module: 'financial',
+          view: 'records'
+        },
+        {
+          id: 'reports',
+          label: 'Relatórios Gerenciais',
+          icon: BarChart3,
+          allowedRoles: ['master_owner', 'company_admin', 'dispatcher', 'financial'],
+          module: 'routing',
+          view: 'reports'
+        }
+      ]
+    },
+    {
+      title: 'Administração & Master',
       items: [
         {
           id: 'master',
           label: isMaster ? 'Painel Master Owner' : 'Configurações',
           icon: isMaster ? ShieldCheck : Settings,
-          allowedRoles: ['master_owner'],
+          allowedRoles: ['master_owner', 'company_admin'],
           module: 'master',
           view: 'master_dashboard'
         }
@@ -202,7 +277,10 @@ export const TheXLogSidebar: React.FC<TheXLogSidebarProps> = ({
     if (m === 'dashboard' && currentModule === 'dashboard') return true;
     if (m === 'driver' && currentModule === 'driver') return true;
     if (m === 'master' && currentModule === 'master') return true;
-    if (m === 'predial' && currentModule === 'predial') return true;
+    if (m === 'fiscal' && currentModule === 'fiscal') return true;
+    if (m === 'financial' && currentModule === 'financial') return true;
+    if (m === 'logistica' && currentModule === 'logistica' && v === activeView) return true;
+    if (m === 'predial' && currentModule === 'predial' && v === activeView) return true;
     if (m === 'routing' && currentModule === 'routing' && v === activeView) return true;
     return false;
   };
@@ -219,21 +297,21 @@ export const TheXLogSidebar: React.FC<TheXLogSidebarProps> = ({
 
       {/* Sidebar Container */}
       <aside
-        className={`fixed top-0 bottom-0 left-0 z-50 flex flex-col bg-[#07090e] border-r border-slate-800/80 transition-all duration-300 ${
+        className={`fixed top-0 bottom-0 left-0 z-50 flex flex-col bg-[#0A0914] border-r border-[#2D2644] transition-all duration-300 ${
           collapsed ? 'w-20' : 'w-64'
         } ${mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
       >
         {/* Brand Header */}
-        <div className="h-16 flex items-center justify-between px-4 border-b border-slate-800/80 shrink-0 bg-[#07090e]">
+        <div className="h-16 flex items-center justify-between px-4 border-b border-[#2D2644] shrink-0 bg-[#0A0914]">
           <div
             onClick={() => handleItemClick('dashboard', 'overview')}
             className="flex items-center gap-3 cursor-pointer group overflow-hidden"
           >
-            {/* TheXLog Geometric Glowing Logo */}
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-violet-600 via-indigo-600 to-fuchsia-600 p-[1.5px] shadow-lg shadow-violet-600/30 shrink-0 group-hover:scale-105 transition">
-              <div className="w-full h-full bg-[#0b0d14] rounded-[10px] flex items-center justify-center font-black text-white text-base">
-                <span className="bg-gradient-to-r from-violet-400 via-fuchsia-300 to-indigo-300 bg-clip-text text-transparent">
-                  X
+            {/* MoviLog Geometric Glowing Logo */}
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-[#8B5CF6] via-[#7C3AED] to-[#D946EF] p-[1.5px] shadow-lg shadow-[#8B5CF6]/30 shrink-0 group-hover:scale-105 transition">
+              <div className="w-full h-full bg-[#0D0B18] rounded-[10px] flex items-center justify-center font-black text-white text-base">
+                <span className="bg-gradient-to-r from-white via-[#C4B5FD] to-[#D946EF] bg-clip-text text-transparent">
+                  M
                 </span>
               </div>
             </div>
@@ -241,13 +319,15 @@ export const TheXLogSidebar: React.FC<TheXLogSidebarProps> = ({
             {!collapsed && (
               <div className="truncate">
                 <div className="flex items-center gap-1.5">
-                  <span className="font-black text-lg text-white tracking-tight">TheXLog</span>
-                  <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-400 border border-violet-500/20">
+                  <span className="font-black text-lg tracking-tight text-white">
+                    Movi<span className="text-[#8B5CF6]">Log</span>
+                  </span>
+                  <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-[#8B5CF6]/15 text-[#C4B5FD] border border-[#8B5CF6]/30">
                     SaaS
                   </span>
                 </div>
-                <span className="text-[10px] text-slate-500 tracking-wider block truncate">
-                  Logística Inteligente
+                <span className="text-[10px] text-[#AAA6B5] tracking-wider block truncate">
+                  Movimento inteligente
                 </span>
               </div>
             )}
@@ -256,7 +336,7 @@ export const TheXLogSidebar: React.FC<TheXLogSidebarProps> = ({
           {/* Desktop Collapse Toggle */}
           <button
             onClick={() => setCollapsed(!collapsed)}
-            className="hidden lg:flex p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-900 border border-transparent hover:border-slate-800 transition"
+            className="hidden lg:flex p-1.5 rounded-lg text-[#AAA6B5] hover:text-white hover:bg-[#1C1829] border border-transparent hover:border-[#2D2644] transition"
             title={collapsed ? 'Expandir Menu' : 'Recolher Menu'}
           >
             {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
@@ -265,27 +345,45 @@ export const TheXLogSidebar: React.FC<TheXLogSidebarProps> = ({
           {/* Mobile Close Button */}
           <button
             onClick={() => setMobileOpen(false)}
-            className="lg:hidden p-1.5 text-slate-400 hover:text-white"
+            className="lg:hidden p-1.5 rounded-lg text-[#AAA6B5] hover:text-white"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Scrollable Navigation Menu */}
+        {/* Public Tracking Shortcut Button in Sidebar */}
+        {!collapsed && onOpenPublicTrack && (
+          <div className="px-3 pt-3">
+            <button
+              onClick={onOpenPublicTrack}
+              className="w-full py-2 px-3 rounded-xl bg-[#1C1829] hover:bg-[#252037] border border-[#8B5CF6]/30 text-xs font-semibold text-[#C4B5FD] flex items-center justify-between transition group shadow-sm"
+            >
+              <div className="flex items-center gap-2">
+                <QrCode className="w-3.5 h-3.5 text-[#8B5CF6]" />
+                <span>Rastreio Público</span>
+              </div>
+              <ChevronRight className="w-3 h-3 text-[#AAA6B5] group-hover:translate-x-0.5 transition" />
+            </button>
+          </div>
+        )}
+
+        {/* Navigation Menu List */}
         <div className="flex-1 overflow-y-auto px-3 py-4 space-y-6">
           {navSections.map((section, sIdx) => {
             const visibleItems = section.items.filter(item =>
-              item.allowedRoles.includes(role) || isMaster
+              isMaster || item.allowedRoles.includes(role)
             );
+
             if (visibleItems.length === 0) return null;
 
             return (
               <div key={sIdx} className="space-y-1">
                 {!collapsed && (
-                  <span className="px-3 text-[10px] font-bold uppercase tracking-widest text-slate-500 block mb-1.5">
+                  <div className="px-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-[#716A85]">
                     {section.title}
-                  </span>
+                  </div>
                 )}
+
                 {visibleItems.map(item => {
                   const Icon = item.icon;
                   const active = isCurrentActive(item.module, item.view);
@@ -294,14 +392,20 @@ export const TheXLogSidebar: React.FC<TheXLogSidebarProps> = ({
                     <button
                       key={item.id}
                       onClick={() => handleItemClick(item.module, item.view)}
-                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition group text-left ${
+                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition-all group ${
                         active
-                          ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-violet-600/25'
-                          : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
-                      }`}
+                          ? 'bg-gradient-to-r from-[#8B5CF6] to-[#7C3AED] text-white shadow-md shadow-[#8B5CF6]/25 font-bold'
+                          : 'text-[#AAA6B5] hover:text-white hover:bg-[#16132C]'
+                      } ${collapsed ? 'justify-center px-0' : ''}`}
                       title={collapsed ? item.label : undefined}
                     >
-                      <Icon className={`w-4 h-4 shrink-0 transition ${active ? 'text-white' : 'text-slate-400 group-hover:text-violet-400'}`} />
+                      <Icon
+                        className={`w-4 h-4 shrink-0 transition-transform ${
+                          active
+                            ? 'text-white scale-110'
+                            : 'text-[#AAA6B5] group-hover:text-[#C4B5FD] group-hover:scale-105'
+                        }`}
+                      />
                       {!collapsed && <span className="truncate">{item.label}</span>}
                     </button>
                   );
@@ -311,28 +415,31 @@ export const TheXLogSidebar: React.FC<TheXLogSidebarProps> = ({
           })}
         </div>
 
-        {/* Bottom User Card & Quick Logout */}
-        <div className="p-3 border-t border-slate-800/80 bg-[#07090e] shrink-0">
-          <div className={`p-2.5 rounded-2xl bg-slate-950 border border-slate-800/90 flex items-center justify-between gap-3 ${collapsed ? 'flex-col' : ''}`}>
-            <div className="flex items-center gap-2.5 overflow-hidden">
-              <div className="w-8 h-8 rounded-xl bg-violet-600/20 border border-violet-500/30 flex items-center justify-center font-bold text-xs text-violet-300 shrink-0">
-                {user?.name?.slice(0, 2).toUpperCase() || 'TX'}
-              </div>
-              {!collapsed && (
-                <div className="truncate text-left">
-                  <span className="text-xs font-bold text-white block truncate">
-                    {user?.name || 'Administrador'}
-                  </span>
-                  <span className="text-[10px] text-slate-500 block truncate font-mono">
-                    {isMaster ? 'Master Owner' : user?.role || 'Operador'}
-                  </span>
-                </div>
-              )}
+        {/* Sidebar Footer User & Logout */}
+        <div className="p-3 border-t border-[#2D2644] bg-[#0A0914] shrink-0">
+          <div
+            className={`flex items-center gap-3 p-2 rounded-xl bg-[#121024] border border-[#2D2644] ${
+              collapsed ? 'justify-center p-1' : ''
+            }`}
+          >
+            <div className="w-8 h-8 rounded-lg bg-[#8B5CF6]/20 border border-[#8B5CF6]/40 flex items-center justify-center text-xs font-bold text-[#C4B5FD] shrink-0">
+              {user?.name ? user.name[0].toUpperCase() : 'U'}
             </div>
 
+            {!collapsed && (
+              <div className="flex-1 min-w-0">
+                <span className="text-xs font-bold text-white block truncate">
+                  {user?.name || 'Operador MoviLog'}
+                </span>
+                <span className="text-[10px] text-[#AAA6B5] block truncate capitalize">
+                  {user?.role.replace('_', ' ') || 'Motorista'}
+                </span>
+              </div>
+            )}
+
             <button
-              onClick={logout}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-900 transition shrink-0"
+              onClick={() => logout()}
+              className="p-1.5 rounded-lg text-[#AAA6B5] hover:text-rose-400 hover:bg-[#1C1829] transition shrink-0"
               title="Encerrar Sessão"
             >
               <LogOut className="w-4 h-4" />

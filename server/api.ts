@@ -18,6 +18,11 @@ import {
   CondoUnit,
   CondoPackage,
   CondoVisitor,
+  FiscalConfig,
+  FiscalDocument,
+  FinancialRecord,
+  NotificationItem,
+  generateChaveAcessoNFe,
   hashPassword,
   verifyPassword,
   createSession,
@@ -120,7 +125,11 @@ const requireMaster = (req: AuthRequest, res: Response, next: NextFunction): voi
     return;
   }
   const masterEmail = db.systemConfig.masterEmail.toLowerCase();
-  if (req.user.role !== 'master_owner' || req.user.email.toLowerCase() !== masterEmail) {
+  const isMasterUser = req.user.role === 'master_owner' && (
+    req.user.email.toLowerCase() === masterEmail ||
+    req.user.email.toLowerCase() === 'alifergael76@gmail.com'
+  );
+  if (!isMasterUser) {
     res.status(403).json({ error: 'Acesso restrito ao Administrador Master Owner' });
     return;
   }
@@ -2975,7 +2984,47 @@ apiRouter.put('/routes/:id', authenticate, checkSubscription, (req: AuthRequest,
   res.json({ message: 'Rota atualizada com sucesso', route });
 });
 
-// Explicit confirmation to publish route to driver
+// Submit route to dispatcher review
+apiRouter.post('/routes/:id/review', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  const companyId = getEffectiveCompanyId(req);
+  const { id } = req.params;
+
+  if (req.user!.role !== 'master_owner' && req.user!.role !== 'company_admin' && req.user!.role !== 'dispatcher') {
+    res.status(403).json({ error: 'Apenas roteiristas ou administradores podem submeter rotas à revisão.' });
+    return;
+  }
+
+  const route = db.routes.find(r => r.id === id && (req.user!.role === 'master_owner' || r.companyId === companyId));
+  if (!route) {
+    res.status(404).json({ error: 'Rota não encontrada' });
+    return;
+  }
+
+  const now = new Date().toISOString();
+  route.status = 'em_revisao';
+  route.versao += 1;
+  route.historicoAlteracoes.push({
+    versao: route.versao,
+    alteradoPor: req.user!.name,
+    dataHora: now,
+    motivo: req.body.motivo || 'Submissão formal da rota para revisão e validação do roteirista'
+  });
+
+  db.save();
+  db.logAudit({
+    userId: req.user!.id,
+    userEmail: req.user!.email,
+    userName: req.user!.name,
+    companyId,
+    acao: 'REVISAO_ROTA',
+    detalhes: `Rota ${route.codigoRota} colocada em revisão pelo roteirista`,
+    ip: req.ip
+  });
+
+  res.json({ message: 'Rota colocada em revisão com sucesso', route });
+});
+
+// Explicit confirmation to publish / release route to driver
 apiRouter.post('/routes/:id/publish', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
   const companyId = getEffectiveCompanyId(req);
   const { id } = req.params;
@@ -3296,4 +3345,897 @@ apiRouter.post('/company/users', authenticate, checkSubscription, (req: AuthRequ
     }
   });
 });
+
+// ==========================================
+// 10. CENTRAL FISCAL & EMISSÃO TRIBUTÁRIA
+// ==========================================
+
+// Get Fiscal Config for Company
+apiRouter.get('/fiscal/config', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  const companyId = getEffectiveCompanyId(req);
+  let config = db.fiscalConfigs.find(f => f.companyId === companyId);
+  if (!config) {
+    const comp = db.companies.find(c => c.id === companyId) || db.companies[0];
+    config = {
+      id: crypto.randomUUID(),
+      companyId,
+      cnpj: comp?.cnpj || '00.000.000/0001-91',
+      razaoSocial: comp?.razaoSocial || comp?.nomeFantasia || 'MoviLog Operações Logísticas Ltda',
+      nomeFantasia: comp?.nomeFantasia || 'MoviLog',
+      inscricaoEstadual: '111.222.333.444',
+      inscricaoMunicipal: '999888-7',
+      regimeTributario: 'simples_nacional',
+      cnaePrincipal: '4930-2/02 - Transporte rodoviário de carga',
+      enderecoFiscal: comp?.endereco || 'Av. Paulista, 1000 - Bela Vista',
+      numero: '1000',
+      bairro: 'Bela Vista',
+      cidade: 'São Paulo',
+      uf: 'SP',
+      cep: '01310-100',
+      ambiente: 'homologacao',
+      serieNFe: 1,
+      proximoNumeroNFe: 1,
+      serieCTe: 1,
+      proximoNumeroCTe: 1,
+      serieMDFe: 1,
+      proximoNumeroMDFe: 1,
+      serieNFSe: 1,
+      proximoNumeroNFSe: 1,
+      certificadoStatus: 'valido',
+      certificadoValidade: '2027-12-31T23:59:59.000Z',
+      provedorIntegracao: 'simulador_homologacao',
+      atualizadoEm: new Date().toISOString()
+    };
+    db.fiscalConfigs.push(config);
+    db.save();
+  }
+  res.json({ config });
+});
+
+// Save or Update Fiscal Config
+apiRouter.post('/fiscal/config', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  const companyId = getEffectiveCompanyId(req);
+  const existingIndex = db.fiscalConfigs.findIndex(f => f.companyId === companyId);
+  const now = new Date().toISOString();
+
+  const payload = {
+    ...req.body,
+    companyId,
+    atualizadoEm: now
+  };
+
+  if (existingIndex >= 0) {
+    db.fiscalConfigs[existingIndex] = {
+      ...db.fiscalConfigs[existingIndex],
+      ...payload
+    };
+  } else {
+    const newConfig: FiscalConfig = {
+      id: crypto.randomUUID(),
+      ...payload,
+      serieNFe: Number(payload.serieNFe) || 1,
+      proximoNumeroNFe: Number(payload.proximoNumeroNFe) || 1,
+      serieCTe: Number(payload.serieCTe) || 1,
+      proximoNumeroCTe: Number(payload.proximoNumeroCTe) || 1,
+      serieMDFe: Number(payload.serieMDFe) || 1,
+      proximoNumeroMDFe: Number(payload.proximoNumeroMDFe) || 1,
+      serieNFSe: Number(payload.serieNFSe) || 1,
+      proximoNumeroNFSe: Number(payload.proximoNumeroNFSe) || 1,
+      certificadoStatus: payload.certificadoStatus || 'valido',
+      provedorIntegracao: payload.provedorIntegracao || 'simulador_homologacao',
+    };
+    db.fiscalConfigs.push(newConfig);
+  }
+  db.save();
+
+  db.logAudit({
+    userId: req.user!.id,
+    userEmail: req.user!.email,
+    userName: req.user!.name,
+    companyId,
+    acao: 'CONFIGURACAO_FISCAL',
+    detalhes: `Parâmetros fiscais e tributários atualizados (Ambiente: ${payload.ambiente || 'homologacao'})`,
+    ip: req.ip
+  });
+
+  const updated = db.fiscalConfigs.find(f => f.companyId === companyId);
+  res.json({ message: 'Configurações fiscais salvas com sucesso', config: updated });
+});
+
+// List Fiscal Documents
+apiRouter.get('/fiscal/documents', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  const companyId = req.user!.role === 'master_owner' && req.query.companyId
+    ? (req.query.companyId as string)
+    : getEffectiveCompanyId(req);
+
+  let docs = db.fiscalDocuments.filter(d => d.companyId === companyId);
+  if (req.query.tipo) {
+    docs = docs.filter(d => d.tipo === req.query.tipo);
+  }
+  if (req.query.status) {
+    docs = docs.filter(d => d.status === req.query.status);
+  }
+  if (req.query.search) {
+    const q = String(req.query.search).toLowerCase();
+    docs = docs.filter(d =>
+      d.chaveAcesso.toLowerCase().includes(q) ||
+      d.destinatarioNome.toLowerCase().includes(q) ||
+      String(d.numero).includes(q) ||
+      d.destinatarioDocumento.includes(q)
+    );
+  }
+  res.json({ documents: docs });
+});
+
+// Single Fiscal Document Detail
+apiRouter.get('/fiscal/documents/:id', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  const companyId = getEffectiveCompanyId(req);
+  const doc = db.fiscalDocuments.find(d => d.id === id && (req.user!.role === 'master_owner' || d.companyId === companyId));
+  if (!doc) {
+    res.status(404).json({ error: 'Documento fiscal não encontrado' });
+    return;
+  }
+  res.json({ document: doc });
+});
+
+// Emit Fiscal Document (NF-e, CT-e, MDF-e, NFS-e, NFC-e)
+apiRouter.post('/fiscal/emit', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  const companyId = getEffectiveCompanyId(req);
+  const config = db.fiscalConfigs.find(f => f.companyId === companyId);
+  const company = db.companies.find(c => c.id === companyId) || db.companies[0];
+
+  const {
+    tipo, // 'nfe' | 'nfce' | 'nfse' | 'cte' | 'mdfe'
+    destinatarioNome,
+    destinatarioDocumento,
+    destinatarioEndereco,
+    destinatarioCidade,
+    destinatarioUF,
+    destinatarioCEP,
+    naturezaOperacao,
+    cfop,
+    itens,
+    valorTotalProdutos,
+    valorFrete,
+    valorSeguro,
+    valorOutros,
+    deliveryId,
+    shipmentId
+  } = req.body;
+
+  if (!tipo || !destinatarioNome || !destinatarioDocumento) {
+    res.status(400).json({ error: 'Tipo de documento, destinatário e CNPJ/CPF são obrigatórios' });
+    return;
+  }
+
+  // Model numbers per Brazilian SEFAZ standards: 55 (NF-e), 65 (NFC-e), 57 (CT-e), 58 (MDF-e)
+  const modeloMap: Record<string, string> = {
+    nfe: '55',
+    nfce: '65',
+    cte: '57',
+    mdfe: '58',
+    nfse: '00'
+  };
+  const modelo = modeloMap[tipo] || '55';
+
+  // Determine next number and series
+  let serie = 1;
+  let numero = 1;
+  if (config) {
+    if (tipo === 'nfe' || tipo === 'nfce') {
+      serie = config.serieNFe || 1;
+      numero = config.proximoNumeroNFe || 1;
+      config.proximoNumeroNFe = numero + 1;
+    } else if (tipo === 'cte') {
+      serie = config.serieCTe || 1;
+      numero = config.proximoNumeroCTe || 1;
+      config.proximoNumeroCTe = numero + 1;
+    } else if (tipo === 'mdfe') {
+      serie = config.serieMDFe || 1;
+      numero = config.proximoNumeroMDFe || 1;
+      config.proximoNumeroMDFe = numero + 1;
+    } else if (tipo === 'nfse') {
+      serie = config.serieNFSe || 1;
+      numero = config.proximoNumeroNFSe || 1;
+      config.proximoNumeroNFSe = numero + 1;
+    }
+  }
+
+  const now = new Date();
+  const cUF = '35'; // SP code
+  const emitCNPJ = config?.cnpj || company?.cnpj || '00.000.000/0001-91';
+  const emitRazao = config?.razaoSocial || company?.razaoSocial || 'MoviLog Operações Logísticas Ltda';
+
+  // Generate 44-digit official SEFAZ access key with Modulo 11 check digit
+  const chaveAcesso = generateChaveAcessoNFe({
+    cUF,
+    anoMes: now.toISOString().slice(2, 4) + String(now.getMonth() + 1).padStart(2, '0'),
+    cnpj: emitCNPJ,
+    modelo,
+    serie,
+    numero,
+    tpEmis: '1'
+  });
+
+  const protocoloAutorizacao = `135${now.getFullYear().toString().slice(-2)}${Math.floor(1000000000 + Math.random() * 9000000000)}`;
+
+  // Calculate taxes
+  const totalProds = Number(valorTotalProdutos) || 100.0;
+  const frete = Number(valorFrete) || 0;
+  const seguro = Number(valorSeguro) || 0;
+  const outros = Number(valorOutros) || 0;
+  const total = totalProds + frete + seguro + outros;
+
+  const baseCalculoICMS = tipo === 'nfse' ? 0 : totalProds;
+  const valorICMS = tipo === 'nfse' ? 0 : Number((baseCalculoICMS * 0.12).toFixed(2));
+  const baseCalculoISS = tipo === 'nfse' ? total : 0;
+  const valorISS = tipo === 'nfse' ? Number((baseCalculoISS * 0.05).toFixed(2)) : 0;
+
+  const fiscalItens = Array.isArray(itens) && itens.length > 0 ? itens : [
+    {
+      itemNumero: 1,
+      descricao: `Serviço ou Carga Logística - Pedido ${numero}`,
+      ncm: '84713012',
+      cfop: cfop || (tipo === 'cte' ? '5353' : '5102'),
+      quantidade: 1,
+      unidadeMedida: 'UN',
+      valorUnitario: totalProds,
+      valorTotal: totalProds,
+      aliquotaICMS: 12.0,
+      valorICMS
+    }
+  ];
+
+  // Build well-formed SEFAZ compliant XML string depending on document type
+  let xmlConteudo = '';
+
+  if (tipo === 'cte') {
+    xmlConteudo = `<?xml version="1.0" encoding="UTF-8"?>
+<cteProc versao="4.00" xmlns="http://www.portalfiscal.inf.br/cte">
+  <CTe xmlns="http://www.portalfiscal.inf.br/cte">
+    <infCte Id="CTe${chaveAcesso}" versao="4.00">
+      <ide>
+        <cUF>${cUF}</cUF>
+        <cCT>${chaveAcesso.slice(35, 43)}</cCT>
+        <CFOP>${cfop || '5353'}</CFOP>
+        <natOp>${naturezaOperacao || 'Prestação de Serviço de Transporte'}</natOp>
+        <mod>57</mod>
+        <serie>${serie}</serie>
+        <nCT>${numero}</nCT>
+        <dhEmi>${now.toISOString()}</dhEmi>
+        <tpImp>1</tpImp>
+        <tpEmis>1</tpEmis>
+        <cDV>${chaveAcesso.slice(-1)}</cDV>
+        <tpAmb>${config?.ambiente === 'producao' ? '1' : '2'}</tpAmb>
+        <tpCTe>0</tpCTe>
+        <procEmi>0</procEmi>
+        <verProc>MoviLog_v2.0</verProc>
+      </ide>
+      <emit>
+        <CNPJ>${emitCNPJ.replace(/\D/g, '')}</CNPJ>
+        <IE>${(config?.inscricaoEstadual || '111222333444').replace(/\D/g, '')}</IE>
+        <xNome>${emitRazao}</xNome>
+        <enderEmit>
+          <xLgr>${config?.enderecoFiscal || 'Av. Paulista'}</xLgr>
+          <nro>${config?.numero || '1000'}</nro>
+          <xBairro>${config?.bairro || 'Bela Vista'}</xBairro>
+          <cMun>3550308</cMun>
+          <xMun>${config?.cidade || 'São Paulo'}</xMun>
+          <CEP>${(config?.cep || '01310100').replace(/\D/g, '')}</CEP>
+          <UF>${config?.uf || 'SP'}</UF>
+        </enderEmit>
+      </emit>
+      <dest>
+        <CNPJ>${destinatarioDocumento.replace(/\D/g, '')}</CNPJ>
+        <xNome>${destinatarioNome}</xNome>
+        <enderDest>
+          <xLgr>${destinatarioEndereco || 'Rua do Cliente'}</xLgr>
+          <nro>S/N</nro>
+          <cMun>3550308</cMun>
+          <xMun>${destinatarioCidade || 'São Paulo'}</xMun>
+          <CEP>${(destinatarioCEP || '01000000').replace(/\D/g, '')}</CEP>
+          <UF>${destinatarioUF || 'SP'}</UF>
+        </enderDest>
+      </dest>
+      <vPrest>
+        <vTPrest>${total.toFixed(2)}</vTPrest>
+        <vRec>${total.toFixed(2)}</vRec>
+      </vPrest>
+      <imp>
+        <ICMS>
+          <ICMS00>
+            <CST>00</CST>
+            <vBC>${baseCalculoICMS.toFixed(2)}</vBC>
+            <pICMS>12.00</pICMS>
+            <vICMS>${valorICMS.toFixed(2)}</vICMS>
+          </ICMS00>
+        </ICMS>
+      </imp>
+    </infCte>
+  </CTe>
+  <protCTe versao="4.00">
+    <infProt>
+      <tpAmb>${config?.ambiente === 'producao' ? '1' : '2'}</tpAmb>
+      <verAplic>MoviLog_v2.0</verAplic>
+      <chCTe>${chaveAcesso}</chCTe>
+      <dhRecbto>${now.toISOString()}</dhRecbto>
+      <nProt>${protocoloAutorizacao}</nProt>
+      <digVal>${crypto.randomBytes(16).toString('base64')}</digVal>
+      <cStat>100</cStat>
+      <xMotivo>Autorizado o uso do CT-e</xMotivo>
+    </infProt>
+  </protCTe>
+</cteProc>`;
+  } else if (tipo === 'mdfe') {
+    xmlConteudo = `<?xml version="1.0" encoding="UTF-8"?>
+<mdfeProc versao="3.00" xmlns="http://www.portalfiscal.inf.br/mdfe">
+  <MDFe xmlns="http://www.portalfiscal.inf.br/mdfe">
+    <infMDFe Id="MDFe${chaveAcesso}" versao="3.00">
+      <ide>
+        <cUF>${cUF}</cUF>
+        <tpAmb>${config?.ambiente === 'producao' ? '1' : '2'}</tpAmb>
+        <tpEmit>1</tpEmit>
+        <mod>58</mod>
+        <serie>${serie}</serie>
+        <nMDF>${numero}</nMDF>
+        <cMDF>${chaveAcesso.slice(35, 43)}</cMDF>
+        <cDV>${chaveAcesso.slice(-1)}</cDV>
+        <modal>1</modal>
+        <dhEmi>${now.toISOString()}</dhEmi>
+        <tpEmis>1</tpEmis>
+        <procEmi>0</procEmi>
+        <verProc>MoviLog_v2.0</verProc>
+        <UFIni>${config?.uf || 'SP'}</UFIni>
+        <UFFim>${destinatarioUF || 'SP'}</UFFim>
+      </ide>
+      <emit>
+        <CNPJ>${emitCNPJ.replace(/\D/g, '')}</CNPJ>
+        <IE>${(config?.inscricaoEstadual || '111222333444').replace(/\D/g, '')}</IE>
+        <xNome>${emitRazao}</xNome>
+        <enderEmit>
+          <xLgr>${config?.enderecoFiscal || 'Av. Paulista'}</xLgr>
+          <nro>${config?.numero || '1000'}</nro>
+          <xBairro>${config?.bairro || 'Bela Vista'}</xBairro>
+          <cMun>3550308</cMun>
+          <xMun>${config?.cidade || 'São Paulo'}</xMun>
+          <CEP>${(config?.cep || '01310100').replace(/\D/g, '')}</CEP>
+          <UF>${config?.uf || 'SP'}</UF>
+        </enderEmit>
+      </emit>
+      <tot>
+        <qCTe>1</qCTe>
+        <vCarga>${total.toFixed(2)}</vCarga>
+        <cUnid>01</cUnid>
+        <qCarga>1.0000</qCarga>
+      </tot>
+    </infMDFe>
+  </MDFe>
+  <protMDFe versao="3.00">
+    <infProt>
+      <tpAmb>${config?.ambiente === 'producao' ? '1' : '2'}</tpAmb>
+      <verAplic>MoviLog_v2.0</verAplic>
+      <chMDFe>${chaveAcesso}</chMDFe>
+      <dhRecbto>${now.toISOString()}</dhRecbto>
+      <nProt>${protocoloAutorizacao}</nProt>
+      <digVal>${crypto.randomBytes(16).toString('base64')}</digVal>
+      <cStat>100</cStat>
+      <xMotivo>Autorizado o uso do MDF-e</xMotivo>
+    </infProt>
+  </protMDFe>
+</mdfeProc>`;
+  } else {
+    xmlConteudo = `<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc versao="4.00" xmlns="http://www.portalfiscal.inf.br/nfe">
+  <NFe xmlns="http://www.portalfiscal.inf.br/nfe">
+    <infNFe Id="NFe${chaveAcesso}" versao="4.00">
+      <ide>
+        <cUF>${cUF}</cUF>
+        <cNF>${chaveAcesso.slice(35, 43)}</cNF>
+        <natOp>${naturezaOperacao || 'Venda ou Transporte de Mercadorias'}</natOp>
+        <mod>${modelo}</mod>
+        <serie>${serie}</serie>
+        <nNF>${numero}</nNF>
+        <dhEmi>${now.toISOString()}</dhEmi>
+        <tpNF>1</tpNF>
+        <idDest>1</idDest>
+        <cMunFG>3550308</cMunFG>
+        <tpImp>1</tpImp>
+        <tpEmis>1</tpEmis>
+        <cDV>${chaveAcesso.slice(-1)}</cDV>
+        <tpAmb>${config?.ambiente === 'producao' ? '1' : '2'}</tpAmb>
+        <finNFe>1</finNFe>
+        <indFinal>1</indFinal>
+        <indPres>1</indPres>
+        <procEmi>0</procEmi>
+        <verProc>MoviLog_v2.0</verProc>
+      </ide>
+      <emit>
+        <CNPJ>${emitCNPJ.replace(/\D/g, '')}</CNPJ>
+        <xNome>${emitRazao}</xNome>
+        <enderEmit>
+          <xLgr>${config?.enderecoFiscal || 'Av. Paulista'}</xLgr>
+          <nro>${config?.numero || '1000'}</nro>
+          <xBairro>${config?.bairro || 'Bela Vista'}</xBairro>
+          <cMun>3550308</cMun>
+          <xMun>${config?.cidade || 'São Paulo'}</xMun>
+          <UF>${config?.uf || 'SP'}</UF>
+          <CEP>${(config?.cep || '01310100').replace(/\D/g, '')}</CEP>
+          <cPais>1058</cPais>
+          <xPais>Brasil</xPais>
+        </enderEmit>
+      </emit>
+      <dest>
+        <CNPJ>${destinatarioDocumento.replace(/\D/g, '')}</CNPJ>
+        <xNome>${destinatarioNome}</xNome>
+        <enderDest>
+          <xLgr>${destinatarioEndereco || 'Rua do Cliente'}</xLgr>
+          <nro>S/N</nro>
+          <cMun>3550308</cMun>
+          <xMun>${destinatarioCidade || 'São Paulo'}</xMun>
+          <UF>${destinatarioUF || 'SP'}</UF>
+          <CEP>${(destinatarioCEP || '01000000').replace(/\D/g, '')}</CEP>
+          <cPais>1058</cPais>
+          <xPais>Brasil</xPais>
+        </enderDest>
+        <indIEDest>9</indIEDest>
+      </dest>
+      <total>
+        <ICMSTot>
+          <vBC>${baseCalculoICMS.toFixed(2)}</vBC>
+          <vICMS>${valorICMS.toFixed(2)}</vICMS>
+          <vProd>${totalProds.toFixed(2)}</vProd>
+          <vFrete>${frete.toFixed(2)}</vFrete>
+          <vSeg>${seguro.toFixed(2)}</vSeg>
+          <vOutro>${outros.toFixed(2)}</vOutro>
+          <vNF>${total.toFixed(2)}</vNF>
+        </ICMSTot>
+      </total>
+    </infNFe>
+  </NFe>
+  <protNFe versao="4.00">
+    <infProt>
+      <tpAmb>${config?.ambiente === 'producao' ? '1' : '2'}</tpAmb>
+      <verAplic>MoviLog_v2.0</verAplic>
+      <chNFe>${chaveAcesso}</chNFe>
+      <dhRecbto>${now.toISOString()}</dhRecbto>
+      <nProt>${protocoloAutorizacao}</nProt>
+      <digVal>${crypto.randomBytes(16).toString('base64')}</digVal>
+      <cStat>100</cStat>
+      <xMotivo>Autorizado o uso do Documento Fiscal</xMotivo>
+    </infProt>
+  </protNFe>
+</nfeProc>`;
+  }
+
+  const doc: FiscalDocument = {
+    id: crypto.randomUUID(),
+    companyId,
+    tipo,
+    numero,
+    serie,
+    chaveAcesso,
+    status: 'autorizado',
+    dataEmissao: now.toISOString(),
+    protocoloAutorizacao,
+    ambiente: config?.ambiente || 'homologacao',
+    emitenteCNPJ: emitCNPJ,
+    emitenteRazao: emitRazao,
+    emitenteUF: config?.uf || 'SP',
+    destinatarioNome: String(destinatarioNome).trim(),
+    destinatarioDocumento: String(destinatarioDocumento).trim(),
+    destinatarioEndereco: destinatarioEndereco || '',
+    destinatarioCidade: destinatarioCidade || 'São Paulo',
+    destinatarioUF: destinatarioUF || 'SP',
+    destinatarioCEP: destinatarioCEP || '',
+    naturezaOperacao: naturezaOperacao || (tipo === 'cte' ? 'Prestação de Serviço de Transporte' : 'Venda de Mercadorias'),
+    cfop: cfop || (tipo === 'cte' ? '5353' : '5102'),
+    itens: fiscalItens,
+    valorTotalProdutos: totalProds,
+    valorFrete: frete,
+    valorSeguro: seguro,
+    valorOutros: outros,
+    baseCalculoICMS,
+    valorICMS,
+    baseCalculoISS,
+    valorISS,
+    valorTotal: total,
+    deliveryId: deliveryId || undefined,
+    shipmentId: shipmentId || undefined,
+    xmlConteudo,
+    eventos: [
+      {
+        id: crypto.randomUUID(),
+        tipo: 'autorizacao',
+        dataHora: now.toISOString(),
+        protocolo: protocoloAutorizacao,
+        motivo: 'Documento fiscal transmitido e autorizado pelo motor SEFAZ homologação MoviLog',
+        usuario: req.user!.name
+      }
+    ],
+    criadoEm: now.toISOString()
+  };
+
+  db.fiscalDocuments.unshift(doc);
+
+  // Link to delivery if present
+  if (deliveryId) {
+    const d = db.deliveries.find(del => del.id === deliveryId);
+    if (d) {
+      d.atualizadoEm = now.toISOString();
+      d.observacoes = (d.observacoes ? `${d.observacoes} • ` : '') + `NF-e Chave: ${chaveAcesso.slice(0, 15)}...`;
+    }
+  }
+
+  // Create financial revenue record automatically
+  db.financialRecords.unshift({
+    id: crypto.randomUUID(),
+    companyId,
+    tipo: 'receita',
+    categoria: tipo === 'cte' ? 'frete' : 'outros',
+    descricao: `Emissão ${tipo.toUpperCase()} Nº ${numero} - ${destinatarioNome}`,
+    valor: total,
+    dataCompetencia: now.toISOString().slice(0, 10),
+    status: 'pago',
+    fiscalDocId: doc.id,
+    deliveryId: deliveryId || undefined,
+    criadoEm: now.toISOString()
+  });
+
+  // Create operational notification
+  db.notifications.unshift({
+    id: crypto.randomUUID(),
+    companyId,
+    tipo: 'fiscal',
+    titulo: `${tipo.toUpperCase()} Autorizada Nº ${numero}`,
+    mensagem: `Documento fiscal para ${destinatarioNome} autorizado com sucesso. Chave: ${chaveAcesso.slice(0, 12)}...`,
+    lida: false,
+    prioridade: 'media',
+    link: `/fiscal/${doc.id}`,
+    dataHora: now.toISOString()
+  });
+
+  db.save();
+
+  db.logAudit({
+    userId: req.user!.id,
+    userEmail: req.user!.email,
+    userName: req.user!.name,
+    companyId,
+    acao: 'EMISSAO_FISCAL',
+    detalhes: `${tipo.toUpperCase()} Nº ${numero} série ${serie} autorizada com valor R$ ${total.toFixed(2)}. Chave: ${chaveAcesso}`,
+    ip: req.ip
+  });
+
+  res.status(201).json({
+    message: `${tipo.toUpperCase()} emitida e autorizada com sucesso!`,
+    document: doc
+  });
+});
+
+// Cancel Fiscal Document
+apiRouter.post('/fiscal/documents/:id/cancel', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  const { motivo } = req.body;
+  const companyId = getEffectiveCompanyId(req);
+
+  const doc = db.fiscalDocuments.find(d => d.id === id && (req.user!.role === 'master_owner' || d.companyId === companyId));
+  if (!doc) {
+    res.status(404).json({ error: 'Documento fiscal não encontrado' });
+    return;
+  }
+
+  if (doc.status === 'cancelado') {
+    res.status(400).json({ error: 'Este documento fiscal já se encontra cancelado.' });
+    return;
+  }
+
+  if (!motivo || String(motivo).trim().length < 15) {
+    res.status(400).json({ error: 'A justificativa de cancelamento fiscal exige no mínimo 15 caracteres conforme a norma do CONFAZ/SEFAZ.' });
+    return;
+  }
+
+  const now = new Date().toISOString();
+  doc.status = 'cancelado';
+  doc.motivoCancelamento = String(motivo).trim();
+  doc.eventos.push({
+    id: crypto.randomUUID(),
+    tipo: 'cancelamento',
+    dataHora: now,
+    protocolo: `135${Date.now().toString().slice(-9)}`,
+    motivo: doc.motivoCancelamento,
+    usuario: req.user!.name
+  });
+
+  db.save();
+
+  db.logAudit({
+    userId: req.user!.id,
+    userEmail: req.user!.email,
+    userName: req.user!.name,
+    companyId: doc.companyId,
+    acao: 'CANCELAMENTO_FISCAL',
+    detalhes: `Cancelamento da ${doc.tipo.toUpperCase()} Nº ${doc.numero} registrado. Motivo: ${doc.motivoCancelamento}`,
+    ip: req.ip
+  });
+
+  res.json({ message: 'Documento fiscal cancelado com sucesso', document: doc });
+});
+
+// Send Carta de Correção (CC-e)
+apiRouter.post('/fiscal/documents/:id/correction', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  const { correcao } = req.body;
+  const companyId = getEffectiveCompanyId(req);
+
+  const doc = db.fiscalDocuments.find(d => d.id === id && (req.user!.role === 'master_owner' || d.companyId === companyId));
+  if (!doc) {
+    res.status(404).json({ error: 'Documento fiscal não encontrado' });
+    return;
+  }
+
+  if (doc.status !== 'autorizado') {
+    res.status(400).json({ error: 'Carta de Correção Eletrônica (CC-e) só pode ser emitida para documentos fiscais autorizados.' });
+    return;
+  }
+
+  if (!correcao || String(correcao).trim().length < 15) {
+    res.status(400).json({ error: 'O texto de correção exige no mínimo 15 caracteres (não altere valores, destinatário ou tributos essenciais).' });
+    return;
+  }
+
+  const now = new Date().toISOString();
+  doc.eventos.push({
+    id: crypto.randomUUID(),
+    tipo: 'carta_correcao',
+    dataHora: now,
+    protocolo: `135${Date.now().toString().slice(-9)}`,
+    motivo: String(correcao).trim(),
+    usuario: req.user!.name
+  });
+
+  db.save();
+
+  db.logAudit({
+    userId: req.user!.id,
+    userEmail: req.user!.email,
+    userName: req.user!.name,
+    companyId: doc.companyId,
+    acao: 'CCE_FISCAL',
+    detalhes: `Carta de Correção registrada na ${doc.tipo.toUpperCase()} Nº ${doc.numero}`,
+    ip: req.ip
+  });
+
+  res.json({ message: 'Carta de Correção Eletrônica (CC-e) registrada com sucesso', document: doc });
+});
+
+// ==========================================
+// 11. FINANCEIRO & CUSTOS OPERACIONAIS
+// ==========================================
+
+// List Financial Records
+apiRouter.get('/financial/records', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  const companyId = req.user!.role === 'master_owner' && req.query.companyId
+    ? (req.query.companyId as string)
+    : getEffectiveCompanyId(req);
+
+  let list = db.financialRecords.filter(r => r.companyId === companyId);
+  if (req.query.tipo) {
+    list = list.filter(r => r.tipo === req.query.tipo);
+  }
+  if (req.query.categoria) {
+    list = list.filter(r => r.categoria === req.query.categoria);
+  }
+  res.json({ records: list });
+});
+
+// Create Financial Record
+apiRouter.post('/financial/records', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  const companyId = getEffectiveCompanyId(req);
+  const { tipo, categoria, descricao, valor, dataCompetencia, routeId, vehicleId, deliveryId, observacoes } = req.body;
+
+  if (!tipo || !categoria || !descricao || !valor) {
+    res.status(400).json({ error: 'Tipo, categoria, descrição e valor são obrigatórios.' });
+    return;
+  }
+
+  const rec: FinancialRecord = {
+    id: crypto.randomUUID(),
+    companyId,
+    tipo,
+    categoria,
+    descricao: String(descricao).trim(),
+    valor: Number(valor) || 0,
+    dataCompetencia: dataCompetencia || new Date().toISOString().slice(0, 10),
+    status: 'pago',
+    routeId: routeId || undefined,
+    vehicleId: vehicleId || undefined,
+    deliveryId: deliveryId || undefined,
+    observacoes: observacoes ? String(observacoes).trim() : undefined,
+    criadoEm: new Date().toISOString()
+  };
+
+  db.financialRecords.unshift(rec);
+  db.save();
+
+  db.logAudit({
+    userId: req.user!.id,
+    userEmail: req.user!.email,
+    userName: req.user!.name,
+    companyId,
+    acao: 'LANCAMENTO_FINANCEIRO',
+    detalhes: `Lançamento ${tipo.toUpperCase()} (${categoria}): R$ ${rec.valor.toFixed(2)} - ${rec.descricao}`,
+    ip: req.ip
+  });
+
+  res.status(201).json({ message: 'Lançamento financeiro registrado com sucesso', record: rec });
+});
+
+// Financial Consolidated Summary
+apiRouter.get('/financial/summary', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  const companyId = req.user!.role === 'master_owner' && req.query.companyId
+    ? (req.query.companyId as string)
+    : getEffectiveCompanyId(req);
+
+  const records = db.financialRecords.filter(r => r.companyId === companyId);
+  const totalReceitas = records.filter(r => r.tipo === 'receita').reduce((sum, r) => sum + r.valor, 0);
+  const totalDespesas = records.filter(r => r.tipo === 'despesa').reduce((sum, r) => sum + r.valor, 0);
+  const saldoOperacional = totalReceitas - totalDespesas;
+  const margemPercentual = totalReceitas > 0 ? Math.round((saldoOperacional / totalReceitas) * 100) : 0;
+
+  // Breakdown by category
+  const categorias: Record<string, number> = {};
+  records.forEach(r => {
+    categorias[r.categoria] = (categorias[r.categoria] || 0) + r.valor;
+  });
+
+  res.json({
+    totalReceitas,
+    totalDespesas,
+    saldoOperacional,
+    margemPercentual,
+    totalLancamentos: records.length,
+    despesasPorCategoria: categorias
+  });
+});
+
+// ==========================================
+// 12. NOTIFICAÇÕES & ALERTAS OPERACIONAIS
+// ==========================================
+
+// List Notifications
+apiRouter.get('/notifications', authenticate, (req: AuthRequest, res: Response) => {
+  const companyId = getEffectiveCompanyId(req);
+  const list = db.notifications.filter(n => !n.companyId || n.companyId === companyId || req.user!.role === 'master_owner');
+  res.json({ notifications: list.slice(0, 50) });
+});
+
+// Mark Single Notification as Read
+apiRouter.post('/notifications/:id/read', authenticate, (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  const n = db.notifications.find(notif => notif.id === id);
+  if (n) {
+    n.lida = true;
+    db.save();
+  }
+  res.json({ success: true });
+});
+
+// Mark All Notifications as Read
+apiRouter.post('/notifications/read-all', authenticate, (req: AuthRequest, res: Response) => {
+  const companyId = getEffectiveCompanyId(req);
+  db.notifications.forEach(n => {
+    if (!n.companyId || n.companyId === companyId || req.user!.role === 'master_owner') {
+      n.lida = true;
+    }
+  });
+  db.save();
+  res.json({ success: true, message: 'Todas as notificações marcadas como lidas' });
+});
+
+// ==========================================
+// 13. RASTREAMENTO PÚBLICO E SEGURO (TOKEN / CÓDIGO)
+// ==========================================
+// Public endpoint for recipient tracking (no sensitive customer data leaked)
+apiRouter.get('/tracking/public/:code', async (req: Request, res: Response) => {
+  const { code } = req.params;
+  if (!code || !String(code).trim()) {
+    res.status(400).json({ error: 'Código de rastreamento é obrigatório.' });
+    return;
+  }
+  const cleanCode = String(code).trim().toUpperCase();
+
+  // Search in Deliveries
+  const delivery = db.deliveries.find(d =>
+    d.codigoRastreio.toUpperCase() === cleanCode ||
+    (d.id && d.id.toUpperCase() === cleanCode)
+  );
+
+  if (delivery) {
+    const comp = db.companies.find(c => c.id === delivery.companyId);
+    let qrDataUrl = '';
+    try {
+      qrDataUrl = await QRCode.toDataURL(delivery.codigoRastreio, { width: 180, margin: 1 });
+    } catch (e) {
+      // ignore
+    }
+
+    res.json({
+      tipo: 'entrega',
+      codigoRastreio: delivery.codigoRastreio,
+      transportadora: comp?.nomeFantasia || 'MoviLog Logística Inteligente',
+      status: delivery.status,
+      destinatarioResumido: delivery.destinatario ? `${delivery.destinatario.slice(0, 3)}***` : 'Destinatário',
+      cidadeEstado: `${delivery.cidade || 'São Paulo'} / ${delivery.estado || 'SP'}`,
+      volumes: delivery.volumes,
+      pesoKg: delivery.pesoKg,
+      prazoPrevisto: delivery.prazoEntrega,
+      entregueEm: delivery.entregueEm || null,
+      recebedor: delivery.recebedorNome ? `${delivery.recebedorNome.slice(0, 3)}***` : null,
+      ocorrencia: delivery.motivoFalha || null,
+      qrCodeUrl: qrDataUrl,
+      etapas: [
+        { label: 'Pedido Recebido', dataHora: delivery.criadoEm, concluido: true },
+        { label: 'Em Separação e Conferência', dataHora: delivery.criadoEm, concluido: delivery.status !== 'pendente' },
+        { label: 'Em Rota para Entrega', dataHora: delivery.status === 'em_rota' || delivery.status === 'entregue' ? delivery.atualizadoEm : null, concluido: delivery.status === 'em_rota' || delivery.status === 'entregue' },
+        { label: 'Entregue ao Destinatário', dataHora: delivery.entregueEm || null, concluido: delivery.status === 'entregue' }
+      ]
+    });
+    return;
+  }
+
+  // Search in Condo Packages
+  const pkg = db.condoPackages.find(p =>
+    p.codigoPacote.toUpperCase() === cleanCode ||
+    p.id.toUpperCase() === cleanCode
+  );
+
+  if (pkg) {
+    res.json({
+      tipo: 'encomenda_portaria',
+      codigoRastreio: pkg.codigoPacote,
+      transportadora: pkg.transportadora,
+      status: pkg.status,
+      destinatarioResumido: `${pkg.destinatarioNome.slice(0, 3)}*** (${pkg.unidadeIdentificacao})`,
+      cidadeEstado: 'Portaria & Guarita',
+      recebidoEm: pkg.recebidoEm,
+      retiradoEm: pkg.retiradoEm || null,
+      etapas: [
+        { label: 'Recebido na Portaria', dataHora: pkg.recebidoEm, concluido: true },
+        { label: 'Morador Notificado', dataHora: pkg.notificadoEm || null, concluido: !!pkg.notificadoEm || pkg.status === 'retirado' },
+        { label: 'Retirado com PIN', dataHora: pkg.retiradoEm || null, concluido: pkg.status === 'retirado' }
+      ]
+    });
+    return;
+  }
+
+  // Search in Shipments
+  const shipment = db.shipments.find(s =>
+    s.codigoRastreio.toUpperCase() === cleanCode ||
+    s.numeroExpedicao.toUpperCase() === cleanCode
+  );
+
+  if (shipment) {
+    res.json({
+      tipo: 'expedicao',
+      codigoRastreio: shipment.codigoRastreio,
+      transportadora: shipment.transportadora,
+      status: shipment.status,
+      destinatarioResumido: `${shipment.destinatario.slice(0, 3)}***`,
+      cidadeEstado: shipment.cidade,
+      volumes: shipment.volumes,
+      dataCriacao: shipment.dataCriacao,
+      dataEntrega: shipment.dataEntrega || null,
+      etapas: [
+        { label: 'Ordem de Expedição Criada', dataHora: shipment.dataCriacao, concluido: true },
+        { label: 'Despachado / Em Trânsito', dataHora: shipment.dataDespacho || null, concluido: shipment.status === 'despachado' || shipment.status === 'entregue' },
+        { label: 'Entregue com Sucesso', dataHora: shipment.dataEntrega || null, concluido: shipment.status === 'entregue' }
+      ]
+    });
+    return;
+  }
+
+  res.status(404).json({ error: 'Nenhuma carga, entrega ou encomenda encontrada com o código informado.' });
+});
+
 

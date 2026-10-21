@@ -13,6 +13,22 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <script>
+      // Suppress Vite HMR WebSocket errors in AI Studio iframe preview
+      window.addEventListener('unhandledrejection', function (event) {
+        var msg = (event && event.reason && (event.reason.message || event.reason.stack || '')) || '';
+        if (msg.includes('WebSocket') || msg.includes('@vite/client')) {
+          event.preventDefault();
+        }
+      });
+      window.addEventListener('error', function (event) {
+        var msg = (event && (event.message || '')) || '';
+        var src = (event && (event.filename || '')) || '';
+        if (msg.includes('WebSocket') || src.includes('@vite/client')) {
+          event.preventDefault();
+        }
+      });
+    </script>
   </head>
   <body class="bg-[#17171D] text-[#F5F3FA] antialiased selection:bg-[#8B5CF6] selection:text-white">
     <div id="root"></div>

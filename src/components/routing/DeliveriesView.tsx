@@ -25,7 +25,11 @@ import {
   UserCheck
 } from 'lucide-react';
 
-export const DeliveriesView: React.FC = () => {
+interface DeliveriesViewProps {
+  initialShowImport?: boolean;
+}
+
+export const DeliveriesView: React.FC<DeliveriesViewProps> = ({ initialShowImport = false }) => {
   const { user, isMaster } = useAuth();
   const [deliveries, setDeliveries] = useState<DeliveryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -37,7 +41,13 @@ export const DeliveriesView: React.FC = () => {
 
   // Modals
   const [showManualModal, setShowManualModal] = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(initialShowImport);
+  const [actionNotification, setActionNotification] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  const showNotification = (text: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setActionNotification({ text, type });
+    setTimeout(() => setActionNotification(null), 5000);
+  };
 
   // Manual Form State
   const [manualForm, setManualForm] = useState({
@@ -229,21 +239,33 @@ export const DeliveriesView: React.FC = () => {
     const ws = XLSX.utils.json_to_sheet(templateData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Modelo_Entregas');
-    XLSX.writeFile(wb, 'modelo_importacao_entregas_letslog.xlsx');
+    XLSX.writeFile(wb, 'modelo_importacao_entregas_movilog.xlsx');
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Deseja realmente remover esta entrega?')) return;
     try {
       await api.deleteDelivery(id);
+      showNotification('Entrega removida com sucesso.', 'info');
       await loadDeliveries();
     } catch (err: any) {
-      alert(err.message || 'Erro ao remover entrega');
+      showNotification(err.message || 'Erro ao remover entrega.', 'error');
     }
   };
 
   return (
     <div className="space-y-6">
+      {actionNotification && (
+        <div className={`p-4 rounded-2xl border text-xs font-semibold flex items-center justify-between shadow-lg ${
+          actionNotification.type === 'success'
+            ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+            : actionNotification.type === 'error'
+            ? 'bg-rose-500/20 border-rose-500/40 text-rose-300'
+            : 'bg-sky-500/20 border-sky-500/40 text-sky-300'
+        }`}>
+          <span>{actionNotification.text}</span>
+          <button onClick={() => setActionNotification(null)} className="text-slate-400 hover:text-white">✕</button>
+        </div>
+      )}
       {/* Top Banner */}
       <div className="bg-gradient-to-r from-sky-500/10 via-slate-900 to-indigo-950/30 border border-sky-500/30 rounded-3xl p-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">

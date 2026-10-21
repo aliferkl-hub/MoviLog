@@ -43,6 +43,12 @@ export const DriverPanelView: React.FC = () => {
   const [motivoFalha, setMotivoFalha] = useState('Destinatário ausente no local');
   const [observacao, setObservacao] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
+  const [bannerMessage, setBannerMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  const showNotification = (text: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setBannerMessage({ text, type });
+    setTimeout(() => setBannerMessage(null), 5000);
+  };
 
   const loadDriverRoute = async () => {
     setLoading(true);
@@ -52,6 +58,7 @@ export const DriverPanelView: React.FC = () => {
       if (res.vehicle) setVehicle(res.vehicle);
     } catch (err: any) {
       console.error('Erro ao buscar rota do motorista:', err);
+      showNotification('Erro ao sincronizar rota com o servidor.', 'error');
     } finally {
       setLoading(false);
     }
@@ -139,8 +146,9 @@ export const DriverPanelView: React.FC = () => {
       await api.startRoute(activeRoute.id);
       await loadDriverRoute();
       if (!gpsActive) toggleGps(); // Auto-prompt GPS on start
+      showNotification('Rota iniciada com sucesso! Bom trabalho.', 'success');
     } catch (err: any) {
-      alert(err.message || 'Erro ao iniciar rota.');
+      showNotification(err.message || 'Erro ao iniciar rota.', 'error');
     }
   };
 
@@ -150,8 +158,9 @@ export const DriverPanelView: React.FC = () => {
     try {
       await api.updateStopStatus(activeRoute.id, stopIdx, { status: 'chegou' });
       await loadDriverRoute();
+      showNotification('Chegada ao local registrada.', 'info');
     } catch (err: any) {
-      alert(err.message || 'Erro ao registrar chegada.');
+      showNotification(err.message || 'Erro ao registrar chegada.', 'error');
     }
   };
 
@@ -176,8 +185,9 @@ export const DriverPanelView: React.FC = () => {
       setRecebedorDocumento('');
       setObservacao('');
       await loadDriverRoute();
+      showNotification('Entrega atualizada com sucesso no servidor!', 'success');
     } catch (err: any) {
-      alert(err.message || 'Erro ao registrar status da entrega.');
+      showNotification(err.message || 'Erro ao registrar status da entrega.', 'error');
     } finally {
       setActionLoading(false);
     }
@@ -227,6 +237,34 @@ export const DriverPanelView: React.FC = () => {
 
   return (
     <div className="max-w-xl mx-auto space-y-4 pb-12">
+      {/* Banner Notifications */}
+      {bannerMessage && (
+        <div className={`p-3.5 rounded-2xl border text-xs font-semibold flex items-center justify-between gap-2 shadow-lg transition-all ${
+          bannerMessage.type === 'success'
+            ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+            : bannerMessage.type === 'error'
+            ? 'bg-rose-500/20 border-rose-500/40 text-rose-300'
+            : 'bg-sky-500/20 border-sky-500/40 text-sky-300'
+        }`}>
+          <div className="flex items-center gap-2">
+            {bannerMessage.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+            ) : bannerMessage.type === 'error' ? (
+              <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
+            ) : (
+              <Radio className="w-4 h-4 shrink-0 text-sky-400" />
+            )}
+            <span>{bannerMessage.text}</span>
+          </div>
+          <button
+            onClick={() => setBannerMessage(null)}
+            className="text-slate-400 hover:text-white p-1 rounded-lg"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Route Header Card */}
       <div className="bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 border border-indigo-500/30 rounded-3xl p-5 shadow-xl">
         <div className="flex items-start justify-between gap-3">
@@ -408,13 +446,19 @@ export const DriverPanelView: React.FC = () => {
               {!isDone && (
                 <div className="pt-2 pl-11 flex flex-wrap items-center gap-2 border-t border-slate-800/80">
                   {/* Open Map Navigation */}
-                  <button
-                    onClick={() => openNavigation(stop)}
+                  <a
+                    href={`https://www.google.com/maps/dir/?api=1&destination=${
+                      stop.lat && stop.lng
+                        ? `${stop.lat},${stop.lng}`
+                        : encodeURIComponent(`${stop.enderecoCompleto}, ${stop.cidade}`)
+                    }`}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-sky-400 transition flex items-center gap-1.5"
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
                     <span>Navegar (Maps/Waze)</span>
-                  </button>
+                  </a>
 
                   {/* Call phone */}
                   {stop.telefone && (

@@ -21,7 +21,10 @@ import {
   Send,
   Building2,
   KeyRound,
-  ArrowUpRight
+  ArrowUpRight,
+  FileText,
+  Radio,
+  DollarSign
 } from 'lucide-react';
 
 export const LandingPage: React.FC = () => {
@@ -35,7 +38,7 @@ export const LandingPage: React.FC = () => {
     setIsPlanModalOpen
   } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<'logistica' | 'predial'>('logistica');
+  const [activeTab, setActiveTab] = useState<'logistica' | 'predial' | 'fiscal'>('logistica');
   const [plans, setPlans] = useState<CommercialPlan[]>([]);
   const [whatsappNumber, setWhatsappNumber] = useState('5511999999999');
 
@@ -66,19 +69,26 @@ export const LandingPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+    <div className="min-h-screen bg-[#070811] text-[#F5F3FA] flex flex-col selection:bg-[#8B5CF6] selection:text-white">
       {/* Top Bar for Master & Login */}
-      <header className="border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-md sticky top-0 z-40">
+      <header className="border-b border-[#2D2644] bg-[#0A0914]/90 backdrop-blur-md sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-indigo-400 flex items-center justify-center text-white shadow-lg shadow-indigo-600/30">
-              <Boxes className="w-5 h-5" />
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-[#8B5CF6] via-[#7C3AED] to-[#D946EF] p-[1.5px] shadow-lg shadow-[#8B5CF6]/30">
+              <div className="w-full h-full bg-[#0D0B18] rounded-[10px] flex items-center justify-center font-black text-white text-base">
+                <span className="bg-gradient-to-r from-white via-[#C4B5FD] to-[#D946EF] bg-clip-text text-transparent">
+                  M
+                </span>
+              </div>
             </div>
             <div>
-              <span className="font-extrabold text-base tracking-tight text-white flex items-center gap-1.5">
-                LET’S LOG <span className="text-[10px] font-bold uppercase tracking-wider text-sky-400 bg-sky-500/10 px-2 py-0.5 rounded-full border border-sky-500/20">LogiPredial Suite</span>
+              <span className="font-extrabold text-lg tracking-tight text-white flex items-center gap-1.5">
+                Movi<span className="text-[#8B5CF6]">Log</span>
+                <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-[#8B5CF6]/15 text-[#C4B5FD] border border-[#8B5CF6]/30">
+                  SaaS Multiempresa
+                </span>
               </span>
-              <p className="text-[10px] text-slate-400">Roteirização, Frota com GPS & Operações</p>
+              <p className="text-[10px] text-[#AAA6B5]">Movimento inteligente. Controle total.</p>
             </div>
           </div>
 
@@ -95,10 +105,10 @@ export const LandingPage: React.FC = () => {
             ) : (
               <button
                 onClick={() => setIsLoginModalOpen(true)}
-                className="px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-300 hover:text-white transition flex items-center gap-1"
+                className="px-3 py-1.5 rounded-xl text-xs font-semibold text-[#AAA6B5] hover:text-white transition flex items-center gap-1.5 border border-[#2D2644] hover:border-[#8B5CF6]/40"
               >
-                <Lock className="w-3.5 h-3.5 text-slate-400" />
-                <span>Entrar</span>
+                <Lock className="w-3.5 h-3.5 text-[#8B5CF6]" />
+                <span>Entrar no Sistema</span>
               </button>
             )}
 
@@ -107,7 +117,7 @@ export const LandingPage: React.FC = () => {
                 setSelectedPlanForCheckout('plan_demo');
                 setIsRegisterModalOpen(true);
               }}
-              className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-lg shadow-indigo-600/25"
+              className="px-4 py-2 rounded-xl bg-gradient-to-r from-[#8B5CF6] to-[#7C3AED] hover:from-[#7C3AED] hover:to-[#6D28D9] text-white text-xs font-bold transition flex items-center gap-1.5 shadow-lg shadow-[#8B5CF6]/25"
             >
               <span>Testar 7 Dias Grátis</span>
               <ArrowRight className="w-3.5 h-3.5" />
@@ -119,32 +129,29 @@ export const LandingPage: React.FC = () => {
       {/* Hero Section */}
       <section className="relative pt-12 pb-20 md:py-24 overflow-hidden">
         {/* Glow Effects */}
-        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[350px] bg-indigo-600/15 rounded-full blur-[120px] pointer-events-none" />
-        <div className="absolute top-1/3 left-1/4 w-[300px] h-[250px] bg-amber-500/10 rounded-full blur-[100px] pointer-events-none" />
+        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[380px] bg-[#8B5CF6]/15 rounded-full blur-[140px] pointer-events-none" />
+        <div className="absolute top-1/3 left-1/4 w-[350px] h-[280px] bg-[#D946EF]/10 rounded-full blur-[110px] pointer-events-none" />
 
         <div className="max-w-5xl mx-auto px-4 sm:px-6 text-center relative z-10">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800/90 border border-slate-700/80 text-xs font-semibold text-slate-300 mb-6">
-            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-            <span>Ecossistema Completo de Logística, Roteirização de Entregas e Gestão Integrada</span>
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#1A162B] border border-[#3E345D] text-xs font-semibold text-[#C4B5FD] mb-6 shadow-inner">
+            <Sparkles className="w-3.5 h-3.5 text-[#D946EF]" />
+            <span>Ecossistema MoviLog — Logística, Roteirização, Documentos Fiscais & Gestão Predial</span>
           </div>
 
           <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black text-white tracking-tight leading-tight">
-            LET’S LOG <br className="hidden sm:inline" />
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-sky-400 via-indigo-300 to-violet-200">
-              Roteirização Inteligente & Frota com GPS,
+            Movi<span className="text-[#8B5CF6]">Log</span> <br className="hidden sm:inline" />
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-white via-[#C4B5FD] to-[#D946EF]">
+              Movimento inteligente.
             </span>{' '}
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-300 to-pink-200">
-              Logística
-            </span>{' '}
-            e{' '}
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-amber-200 to-orange-300">
-              Gestão Predial
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#8B5CF6] via-[#A855F7] to-[#EC4899]">
+              Controle total.
             </span>
           </h1>
 
-          <p className="mt-6 text-base sm:text-lg text-slate-400 max-w-3xl mx-auto leading-relaxed">
-            Importação em lote de entregas (planilhas CSV/Excel), motor de roteirização geográfica com cálculo de carga e sequência,
-            painel do entregador com navegação e GPS em tempo real, somados à expedição com QR Code e portaria com PIN.
+          <p className="mt-6 text-base sm:text-lg text-[#AAA6B5] max-w-3xl mx-auto leading-relaxed">
+            Plataforma unificada para transportadoras, operadores logísticos e edifícios empresariais:
+            roteirizador geográfico com cálculo de capacidade, mapa operacional em tempo real,
+            emissão fiscal de NF-e, CT-e e MDF-e, expedição com QR Code e portaria com PIN seguro.
           </p>
 
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
@@ -153,7 +160,7 @@ export const LandingPage: React.FC = () => {
                 setSelectedPlanForCheckout('plan_demo');
                 setIsRegisterModalOpen(true);
               }}
-              className="w-full sm:w-auto px-6 py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm transition flex items-center justify-center gap-2 shadow-xl shadow-indigo-600/25"
+              className="w-full sm:w-auto px-6 py-3.5 rounded-xl bg-gradient-to-r from-[#8B5CF6] to-[#7C3AED] hover:from-[#7C3AED] hover:to-[#6D28D9] text-white font-bold text-sm transition flex items-center justify-center gap-2 shadow-xl shadow-[#8B5CF6]/30"
             >
               <Boxes className="w-4 h-4" />
               <span>Solicitar Demonstração Gratuita (7 Dias)</span>
@@ -161,141 +168,185 @@ export const LandingPage: React.FC = () => {
 
             <a
               href="#planos"
-              className="w-full sm:w-auto px-6 py-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-200 font-semibold text-sm transition flex items-center justify-center gap-2"
+              className="w-full sm:w-auto px-6 py-3.5 rounded-xl bg-[#121024] hover:bg-[#1A162B] border border-[#2D2644] text-[#F5F3FA] font-semibold text-sm transition flex items-center justify-center gap-2"
             >
               <span>Ver Planos Comerciais</span>
-              <ChevronRight className="w-4 h-4 text-slate-400" />
+              <ChevronRight className="w-4 h-4 text-[#AAA6B5]" />
             </a>
           </div>
 
-          <div className="mt-10 flex flex-wrap items-center justify-center gap-6 text-xs text-slate-400">
+          <div className="mt-10 flex flex-wrap items-center justify-center gap-6 text-xs text-[#AAA6B5]">
             <div className="flex items-center gap-1.5">
               <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              <span>Multiempresa com isolamento total de dados</span>
+              <span>Multiempresa com isolamento seguro no servidor</span>
             </div>
             <div className="flex items-center gap-1.5">
               <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              <span>Contratação direta no WhatsApp com validação manual</span>
+              <span>Central Fiscal NF-e, CT-e e MDF-e com simulador</span>
             </div>
             <div className="flex items-center gap-1.5">
               <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              <span>Master Owner com acesso permanente permanente</span>
+              <span>Rastreamento público com link e PIN seguro</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              <span>Master Owner com controle global permanente</span>
             </div>
           </div>
         </div>
       </section>
 
       {/* Interactive Products Showcase */}
-      <section className="py-16 bg-slate-900/50 border-y border-slate-800/80">
+      <section className="py-16 bg-[#0A0914] border-y border-[#2D2644]">
         <div className="max-w-6xl mx-auto px-4 sm:px-6">
           <div className="text-center max-w-2xl mx-auto mb-10">
-            <span className="text-xs font-bold uppercase tracking-wider text-indigo-400 bg-indigo-500/10 px-3 py-1 rounded-full border border-indigo-500/20">
-              Dois Módulos em Uma Solução
+            <span className="text-xs font-bold uppercase tracking-wider text-[#C4B5FD] bg-[#8B5CF6]/15 px-3 py-1 rounded-full border border-[#8B5CF6]/30">
+              Arquitetura Modular Integrada
             </span>
             <h2 className="text-2xl sm:text-3xl font-extrabold text-white mt-2">
-              Conheça as Funcionalidades Operacionais
+              Conheça os Módulos MoviLog
             </h2>
-            <p className="text-xs text-slate-400 mt-2">
+            <p className="text-xs text-[#AAA6B5] mt-2">
               Alterne abaixo para explorar os recursos de cada módulo especializado.
             </p>
 
-            <div className="mt-6 inline-flex p-1 bg-slate-800 rounded-2xl border border-slate-700/80">
+            <div className="mt-6 inline-flex p-1 bg-[#121024] rounded-2xl border border-[#2D2644] flex-wrap justify-center gap-1">
               <button
                 onClick={() => setActiveTab('logistica')}
                 className={`px-5 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
                   activeTab === 'logistica'
-                    ? 'bg-indigo-600 text-white shadow-md'
-                    : 'text-slate-400 hover:text-white'
+                    ? 'bg-gradient-to-r from-[#8B5CF6] to-[#7C3AED] text-white shadow-md shadow-[#8B5CF6]/30'
+                    : 'text-[#AAA6B5] hover:text-white'
                 }`}
               >
                 <Truck className="w-4 h-4" />
-                <span>1. Logística e Expedição Empresarial</span>
+                <span>1. Transporte & Roteirizador</span>
+              </button>
+              <button
+                onClick={() => setActiveTab('fiscal')}
+                className={`px-5 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+                  activeTab === 'fiscal'
+                    ? 'bg-gradient-to-r from-[#8B5CF6] to-[#7C3AED] text-white shadow-md shadow-[#8B5CF6]/30'
+                    : 'text-[#AAA6B5] hover:text-white'
+                }`}
+              >
+                <FileText className="w-4 h-4" />
+                <span>2. Central Fiscal (NF-e/CT-e/MDF-e)</span>
               </button>
               <button
                 onClick={() => setActiveTab('predial')}
                 className={`px-5 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
                   activeTab === 'predial'
-                    ? 'bg-amber-500 text-slate-950 shadow-md'
-                    : 'text-slate-400 hover:text-white'
+                    ? 'bg-gradient-to-r from-[#8B5CF6] to-[#7C3AED] text-white shadow-md shadow-[#8B5CF6]/30'
+                    : 'text-[#AAA6B5] hover:text-white'
                 }`}
               >
                 <Building className="w-4 h-4" />
-                <span>2. Gestão Predial & Portaria</span>
+                <span>3. Gestão Predial & Portaria</span>
               </button>
             </div>
           </div>
 
-          {/* Module 1 Display */}
+          {/* Module 1 Display: Logistics & Routing */}
           {activeTab === 'logistica' && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-                <div className="w-12 h-12 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center mb-4">
+              <div className="bg-[#121024] border border-[#2D2644] rounded-2xl p-6">
+                <div className="w-12 h-12 rounded-xl bg-[#8B5CF6]/20 text-[#8B5CF6] flex items-center justify-center mb-4 border border-[#8B5CF6]/30">
                   <Truck className="w-6 h-6" />
                 </div>
-                <h3 className="text-base font-bold text-white mb-2">Recebimento com QR Code</h3>
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  Registro imediato de entrada de volumes, fornecedor, transportadora, nota fiscal,
-                  conferência detalhada e controle fotográfico de avarias com impressão de etiquetas QR Code.
+                <h3 className="text-base font-bold text-white mb-2">Roteirizador & Otimização</h3>
+                <p className="text-xs text-[#AAA6B5] leading-relaxed">
+                  Sequenciamento de paradas com cálculo inteligente de quilometragem, tempo estimado e capacidade volumétrica e de peso por tipo de veículo.
                 </p>
               </div>
 
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-                <div className="w-12 h-12 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center mb-4">
-                  <Boxes className="w-6 h-6" />
+              <div className="bg-[#121024] border border-[#2D2644] rounded-2xl p-6">
+                <div className="w-12 h-12 rounded-xl bg-[#8B5CF6]/20 text-[#8B5CF6] flex items-center justify-center mb-4 border border-[#8B5CF6]/30">
+                  <Radio className="w-6 h-6" />
                 </div>
-                <h3 className="text-base font-bold text-white mb-2">Estoque e Posições Físicas</h3>
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  Controle por setor, corredor e prateleira. Alertas automáticos de estoque mínimo,
-                  transferências internas e ajustes de inventário com justificativa auditada.
+                <h3 className="text-base font-bold text-white mb-2">Mapa Operacional & GPS</h3>
+                <p className="text-xs text-[#AAA6B5] leading-relaxed">
+                  Telemetria ao vivo da frota, localização de motoristas, status de entregas em andamento e linha de tempo com estimativas de chegada.
                 </p>
               </div>
 
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-                <div className="w-12 h-12 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center mb-4">
-                  <Send className="w-6 h-6" />
+              <div className="bg-[#121024] border border-[#2D2644] rounded-2xl p-6">
+                <div className="w-12 h-12 rounded-xl bg-[#8B5CF6]/20 text-[#8B5CF6] flex items-center justify-center mb-4 border border-[#8B5CF6]/30">
+                  <QrCode className="w-6 h-6" />
                 </div>
-                <h3 className="text-base font-bold text-white mb-2">Expedição e Despacho</h3>
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  Ordem de separação, conferência de cargas, atribuição de motorista e placa de veículo,
-                  etiqueta de despacho e acompanhamento de etapas até a entrega ao cliente.
+                <h3 className="text-base font-bold text-white mb-2">Expedição & QR Code</h3>
+                <p className="text-xs text-[#AAA6B5] leading-relaxed">
+                  Conferência física de carga, geração de etiquetas com QR Code rastreável, comprovante digital de entrega (POD) e gestão de avarias.
                 </p>
               </div>
             </div>
           )}
 
-          {/* Module 2 Display */}
+          {/* Module 2 Display: Fiscal */}
+          {activeTab === 'fiscal' && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="bg-[#121024] border border-[#2D2644] rounded-2xl p-6">
+                <div className="w-12 h-12 rounded-xl bg-[#8B5CF6]/20 text-[#8B5CF6] flex items-center justify-center mb-4 border border-[#8B5CF6]/30">
+                  <FileText className="w-6 h-6" />
+                </div>
+                <h3 className="text-base font-bold text-white mb-2">Emissão de NF-e, CT-e e MDF-e</h3>
+                <p className="text-xs text-[#AAA6B5] leading-relaxed">
+                  Geração em lote e individual de documentos fiscais de transporte e mercadorias com chave de acesso de 44 dígitos, protocolo e cálculo de frete.
+                </p>
+              </div>
+
+              <div className="bg-[#121024] border border-[#2D2644] rounded-2xl p-6">
+                <div className="w-12 h-12 rounded-xl bg-[#8B5CF6]/20 text-[#8B5CF6] flex items-center justify-center mb-4 border border-[#8B5CF6]/30">
+                  <ShieldCheck className="w-6 h-6" />
+                </div>
+                <h3 className="text-base font-bold text-white mb-2">Simulador SEFAZ & Homologação</h3>
+                <p className="text-xs text-[#AAA6B5] leading-relaxed">
+                  Ambiente de testes para homologação com retorno imediato de autorização, além de suporte para certificado digital modelo A1.
+                </p>
+              </div>
+
+              <div className="bg-[#121024] border border-[#2D2644] rounded-2xl p-6">
+                <div className="w-12 h-12 rounded-xl bg-[#8B5CF6]/20 text-[#8B5CF6] flex items-center justify-center mb-4 border border-[#8B5CF6]/30">
+                  <DollarSign className="w-6 h-6" />
+                </div>
+                <h3 className="text-base font-bold text-white mb-2">Visualizador XML & DANFE</h3>
+                <p className="text-xs text-[#AAA6B5] leading-relaxed">
+                  Pré-visualização do espelho DANFE / DACTE formatado para impressão, download do XML padrão nacional e carta de correção (CC-e).
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Module 3 Display: Predial */}
           {activeTab === 'predial' && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-                <div className="w-12 h-12 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center mb-4">
+              <div className="bg-[#121024] border border-[#2D2644] rounded-2xl p-6">
+                <div className="w-12 h-12 rounded-xl bg-[#8B5CF6]/20 text-[#8B5CF6] flex items-center justify-center mb-4 border border-[#8B5CF6]/30">
                   <Package className="w-6 h-6" />
                 </div>
                 <h3 className="text-base font-bold text-white mb-2">Encomendas com PIN & WhatsApp</h3>
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  Ao receber o pacote na portaria, o porteiro gera um código PIN individual e avisa o morador
-                  com um clique via WhatsApp. A retirada exige a digitação correta do PIN.
+                <p className="text-xs text-[#AAA6B5] leading-relaxed">
+                  Recebimento na portaria com geração automática de PIN de 4 dígitos e aviso instantâneo via WhatsApp. Baixa segura na retirada.
                 </p>
               </div>
 
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-                <div className="w-12 h-12 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center mb-4">
+              <div className="bg-[#121024] border border-[#2D2644] rounded-2xl p-6">
+                <div className="w-12 h-12 rounded-xl bg-[#8B5CF6]/20 text-[#8B5CF6] flex items-center justify-center mb-4 border border-[#8B5CF6]/30">
                   <Users className="w-6 h-6" />
                 </div>
                 <h3 className="text-base font-bold text-white mb-2">Visitantes & Prestadores</h3>
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  Controle de entrada e saída em tempo real na portaria com autorização do morador,
-                  documento, empresa prestadora e tempo de permanência no local.
+                <p className="text-xs text-[#AAA6B5] leading-relaxed">
+                  Controle rigoroso de portaria com registro de documento, empresa prestadora, morador autorizador e tempo de permanência.
                 </p>
               </div>
 
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-                <div className="w-12 h-12 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center mb-4">
+              <div className="bg-[#121024] border border-[#2D2644] rounded-2xl p-6">
+                <div className="w-12 h-12 rounded-xl bg-[#8B5CF6]/20 text-[#8B5CF6] flex items-center justify-center mb-4 border border-[#8B5CF6]/30">
                   <Building2 className="w-6 h-6" />
                 </div>
-                <h3 className="text-base font-bold text-white mb-2">Estrutura de Blocos e Unidades</h3>
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  Cadastro de torres, andares, apartamentos e salas comerciais com proteção LGPD de dados
-                  e histórico de moradores autorizados a retirar pacotes.
+                <h3 className="text-base font-bold text-white mb-2">Unidades & Moradores</h3>
+                <p className="text-xs text-[#AAA6B5] leading-relaxed">
+                  Estrutura de torres, andares e conjuntos corporativos com proteção LGPD e histórico de retiradas por unidade.
                 </p>
               </div>
             </div>
@@ -306,13 +357,13 @@ export const LandingPage: React.FC = () => {
       {/* Pricing Section */}
       <section id="planos" className="py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center max-w-2xl mx-auto mb-12">
-          <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20">
+          <span className="text-xs font-bold uppercase tracking-wider text-[#C4B5FD] bg-[#8B5CF6]/15 px-3 py-1 rounded-full border border-[#8B5CF6]/30">
             Transparência Comercial
           </span>
           <h2 className="text-3xl font-extrabold text-white mt-2">
-            Planos Comerciais Editáveis pelo Master Owner
+            Planos Comerciais Gerenciados pelo Master Owner
           </h2>
-          <p className="text-xs text-slate-400 mt-2">
+          <p className="text-xs text-[#AAA6B5] mt-2">
             Inicie sua demonstração gratuita de 7 dias ou contrate diretamente com o administrador via WhatsApp.
           </p>
         </div>
@@ -325,21 +376,21 @@ export const LandingPage: React.FC = () => {
             return (
               <div
                 key={p.id}
-                className={`relative rounded-3xl p-6 border flex flex-col justify-between ${
+                className={`relative rounded-3xl p-6 border flex flex-col justify-between transition-all ${
                   p.destaque
-                    ? 'bg-slate-900 border-indigo-500 ring-2 ring-indigo-500/30 shadow-2xl'
-                    : 'bg-slate-900/80 border-slate-800 hover:border-slate-700'
+                    ? 'bg-[#121024] border-[#8B5CF6] ring-2 ring-[#8B5CF6]/40 shadow-2xl shadow-[#8B5CF6]/20'
+                    : 'bg-[#0E0C1C] border-[#2D2644] hover:border-[#8B5CF6]/40'
                 }`}
               >
                 {p.destaque && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-indigo-600 text-white text-[10px] font-bold uppercase tracking-wider px-3 py-0.5 rounded-full shadow-md">
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-gradient-to-r from-[#8B5CF6] to-[#D946EF] text-white text-[10px] font-black uppercase tracking-wider px-3 py-0.5 rounded-full shadow-md">
                     Mais Escolhido
                   </div>
                 )}
 
                 <div>
                   <h3 className="text-lg font-bold text-white">{p.nome}</h3>
-                  <p className="text-xs text-slate-400 mt-1 min-h-[36px]">{p.descricao}</p>
+                  <p className="text-xs text-[#AAA6B5] mt-1 min-h-[36px]">{p.descricao}</p>
 
                   <div className="my-5">
                     {isDemo ? (
@@ -348,44 +399,44 @@ export const LandingPage: React.FC = () => {
                       <div className="text-2xl font-black text-white">Sob Consulta</div>
                     ) : (
                       <div className="flex items-baseline gap-1">
-                        <span className="text-xs text-slate-400">R$</span>
+                        <span className="text-xs text-[#AAA6B5]">R$</span>
                         <span className="text-3xl font-black text-white">{p.precoMensal}</span>
-                        <span className="text-xs text-slate-400">/mês</span>
+                        <span className="text-xs text-[#AAA6B5]">/mês</span>
                       </div>
                     )}
                   </div>
 
-                  <div className="text-xs space-y-1.5 py-3 border-y border-slate-800/80 text-slate-300">
+                  <div className="text-xs space-y-1.5 py-3 border-y border-[#2D2644] text-[#C4B5FD]">
                     <div className="flex justify-between">
-                      <span className="text-slate-400">Usuários:</span>
+                      <span className="text-[#AAA6B5]">Usuários:</span>
                       <span className="font-bold text-white">{p.limites.maxUsuarios}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-slate-400">Unidades/Galpões:</span>
+                      <span className="text-[#AAA6B5]">Unidades/Galpões:</span>
                       <span className="font-bold text-white">{p.limites.maxUnidades}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-slate-400">Operações/mês:</span>
+                      <span className="text-[#AAA6B5]">Operações/mês:</span>
                       <span className="font-bold text-white">{p.limites.maxOperacoesMes.toLocaleString('pt-BR')}</span>
                     </div>
                   </div>
 
                   <ul className="mt-4 space-y-2 text-xs">
                     {p.recursos.map((rec, i) => (
-                      <li key={i} className="flex items-start gap-2 text-slate-300">
+                      <li key={i} className="flex items-start gap-2 text-[#AAA6B5]">
                         <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
-                        <span className="text-[11px] leading-tight">{rec}</span>
+                        <span className="text-[11px] leading-tight text-white/90">{rec}</span>
                       </li>
                     ))}
                   </ul>
                 </div>
 
-                <div className="mt-6 pt-4 border-t border-slate-800">
+                <div className="mt-6 pt-4 border-t border-[#2D2644]">
                   <button
                     onClick={() => handleContractPlan(p)}
                     className={`w-full py-3 px-4 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 ${
                       isDemo
-                        ? 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/25'
+                        ? 'bg-gradient-to-r from-[#8B5CF6] to-[#7C3AED] hover:from-[#7C3AED] hover:to-[#6D28D9] text-white shadow-lg shadow-[#8B5CF6]/25'
                         : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/25'
                     }`}
                   >
@@ -410,21 +461,23 @@ export const LandingPage: React.FC = () => {
       </section>
 
       {/* Footer */}
-      <footer className="mt-auto border-t border-slate-800 bg-slate-950 py-8 text-xs text-slate-500">
+      <footer className="mt-auto border-t border-[#2D2644] bg-[#0A0914] py-8 text-xs text-[#716A85]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
-            <Boxes className="w-4 h-4 text-indigo-400" />
-            <span className="font-bold text-slate-300">LogiPredial SaaS</span>
-            <span>• Plataforma Integrada de Logística, Expedição e Gestão Predial</span>
+            <div className="w-6 h-6 rounded-lg bg-[#8B5CF6]/20 border border-[#8B5CF6]/40 flex items-center justify-center font-bold text-white text-xs">
+              M
+            </div>
+            <span className="font-bold text-white">Movi<span className="text-[#8B5CF6]">Log</span> SaaS</span>
+            <span>• Movimento inteligente. Controle total.</span>
           </div>
 
           <div className="flex items-center gap-4">
             <span>Master Owner Oficial: {masterEmail}</span>
             <button
               onClick={() => setIsLoginModalOpen(true)}
-              className="text-slate-400 hover:text-white underline underline-offset-4"
+              className="text-[#AAA6B5] hover:text-[#C4B5FD] underline underline-offset-4"
             >
-              Área do Cliente
+              Acessar Plataforma
             </button>
           </div>
         </div>

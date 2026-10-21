@@ -16,7 +16,11 @@ import {
   CondoPackage,
   CondoVisitor,
   MasterStats,
-  DashboardMetrics
+  DashboardMetrics,
+  FiscalConfig,
+  FiscalDocument,
+  FinancialRecord,
+  NotificationItem
 } from '../types';
 
 const TOKEN_KEY = 'logipredial_auth_token';
@@ -297,6 +301,11 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(payload),
     }),
+  reviewRoute: (id: string, motivo?: string) =>
+    request<{ message: string; route: DeliveryRoute }>(`/api/routes/${id}/review`, {
+      method: 'POST',
+      body: JSON.stringify({ motivo }),
+    }),
   publishRoute: (id: string) =>
     request<{ message: string; route: DeliveryRoute }>(`/api/routes/${id}/publish`, {
       method: 'POST',
@@ -321,6 +330,68 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+
+  // MoviLog — Central Fiscal
+  getFiscalConfig: (companyId?: string) =>
+    request<{ config: FiscalConfig }>(companyId ? `/api/fiscal/config?companyId=${companyId}` : '/api/fiscal/config'),
+  saveFiscalConfig: (payload: Partial<FiscalConfig>) =>
+    request<{ message: string; config: FiscalConfig }>('/api/fiscal/config', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getFiscalDocuments: (filters: Record<string, string> = {}) => {
+    const params = new URLSearchParams(filters);
+    return request<{ documents: FiscalDocument[] }>(`/api/fiscal/documents?${params.toString()}`);
+  },
+  getFiscalDocumentById: (id: string) =>
+    request<{ document: FiscalDocument }>(`/api/fiscal/documents/${id}`),
+  emitFiscalDocument: (payload: any) =>
+    request<{ message: string; document: FiscalDocument }>('/api/fiscal/emit', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  cancelFiscalDocument: (id: string, motivo: string) =>
+    request<{ message: string; document: FiscalDocument }>(`/api/fiscal/documents/${id}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({ motivo }),
+    }),
+  sendFiscalCorrection: (id: string, correcao: string) =>
+    request<{ message: string; document: FiscalDocument }>(`/api/fiscal/documents/${id}/correction`, {
+      method: 'POST',
+      body: JSON.stringify({ correcao }),
+    }),
+
+  // MoviLog — Financeiro & Custos
+  getFinancialRecords: (filters: Record<string, string> = {}) => {
+    const params = new URLSearchParams(filters);
+    return request<{ records: FinancialRecord[] }>(`/api/financial/records?${params.toString()}`);
+  },
+  createFinancialRecord: (payload: any) =>
+    request<{ message: string; record: FinancialRecord }>('/api/financial/records', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getFinancialSummary: (companyId?: string) =>
+    request<{
+      totalReceitas: number;
+      totalDespesas: number;
+      saldoOperacional: number;
+      margemPercentual: number;
+      totalLancamentos: number;
+      despesasPorCategoria: Record<string, number>;
+    }>(companyId ? `/api/financial/summary?companyId=${companyId}` : '/api/financial/summary'),
+
+  // MoviLog — Notificações
+  getNotifications: () =>
+    request<{ notifications: NotificationItem[] }>('/api/notifications'),
+  markNotificationRead: (id: string) =>
+    request<{ success: boolean }>(`/api/notifications/${id}/read`, { method: 'POST' }),
+  markAllNotificationsRead: () =>
+    request<{ success: boolean; message: string }>('/api/notifications/read-all', { method: 'POST' }),
+
+  // MoviLog — Rastreamento Público Seguro
+  getPublicTracking: (code: string) =>
+    request<any>(`/api/tracking/public/${encodeURIComponent(code)}`),
 };
 
 // WhatsApp Sales helper generator
@@ -335,15 +406,15 @@ export const buildWhatsAppSalesUrl = (
 ): string => {
   const cleanPhone = (whatsappNumber || '5511999999999').replace(/\D/g, '');
   const solicitacaoLine = solicitacaoId ? `\nIdentificador da Solicitação: ${solicitacaoId}` : '';
-  const message = `Olá! Tenho interesse em contratar o plano ${planName} da plataforma LogiPredial.
+  const message = `Olá! Tenho interesse em contratar a plataforma MoviLog (${planName}).
 
 Empresa: ${companyName || 'Nova Empresa'}
-CNPJ, quando aplicável: ${cnpj || 'A informar'}
-Plano selecionado: ${planName}
+CNPJ: ${cnpj || 'A informar'}
+Plano: ${planName}
 Valor informado: ${priceStr || 'A combinar'}
-Período contratado: ${periodStr}${solicitacaoLine}
+Período: ${periodStr}${solicitacaoLine}
 
-Gostaria de receber as instruções para pagamento e ativação.`;
+Gostaria de receber instruções para ativação imediata.`;
 
   return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
 };

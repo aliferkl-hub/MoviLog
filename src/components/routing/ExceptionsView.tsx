@@ -39,6 +39,8 @@ export const ExceptionsView: React.FC = () => {
     loadData();
   }, []);
 
+  const [feedback, setFeedback] = useState<string | null>(null);
+
   const handleReschedule = async (deliveryId: string) => {
     setActionLoadingId(deliveryId);
     try {
@@ -47,9 +49,12 @@ export const ExceptionsView: React.FC = () => {
         routeId: undefined,
         sequencia: undefined
       });
+      setFeedback('Entrega reagendada com sucesso para nova rota!');
+      setTimeout(() => setFeedback(null), 4000);
       await loadData();
     } catch (err: any) {
-      alert(err.message || 'Erro ao reagendar entrega.');
+      setFeedback(err.message || 'Erro ao reagendar entrega.');
+      setTimeout(() => setFeedback(null), 5000);
     } finally {
       setActionLoadingId(null);
     }
@@ -108,6 +113,13 @@ export const ExceptionsView: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {feedback && (
+        <div className="p-3 bg-violet-600/20 border border-violet-500/40 rounded-xl text-violet-200 text-xs font-semibold flex items-center justify-between">
+          <span>{feedback}</span>
+          <button onClick={() => setFeedback(null)} className="text-slate-400 hover:text-white">✕</button>
+        </div>
+      )}
 
       {/* Exception Cards / List */}
       {loading ? (

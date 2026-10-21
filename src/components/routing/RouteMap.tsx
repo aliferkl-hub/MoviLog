@@ -52,11 +52,12 @@ export const RouteMap: React.FC<RouteMapProps> = ({
 
     const validCoords: L.LatLngTuple[] = [];
 
-    // Add Stops
+    // Add Stops with real coordinates only (do not invent coordinates)
     stops.forEach((stop, index) => {
-      const lat = stop.lat || -23.5505 + (index * 0.008);
-      const lng = stop.lng || -46.6333 + (index * 0.006);
-      const coord: L.LatLngTuple = [lat, lng];
+      const hasRealCoords = typeof stop.lat === 'number' && typeof stop.lng === 'number' && !isNaN(stop.lat) && !isNaN(stop.lng) && (stop.lat !== 0 || stop.lng !== 0);
+      if (!hasRealCoords) return;
+
+      const coord: L.LatLngTuple = [stop.lat!, stop.lng!];
       validCoords.push(coord);
 
       const isSelected = selectedStopIndex === index;
@@ -178,12 +179,21 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     }
   }, [stops, vehicle, selectedStopIndex]);
 
+  const stopsWithoutCoords = stops.filter(
+    s => !(typeof s.lat === 'number' && typeof s.lng === 'number' && !isNaN(s.lat) && !isNaN(s.lng) && (s.lat !== 0 || s.lng !== 0))
+  );
+
   return (
     <div className="w-full relative rounded-2xl overflow-hidden border border-slate-800 shadow-inner bg-slate-950">
       <div ref={mapContainerRef} style={{ height, width: '100%', zIndex: 10 }} />
       {stops.length === 0 && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-950/80 text-slate-400 text-xs font-semibold">
           Nenhuma parada com coordenadas selecionada
+        </div>
+      )}
+      {stopsWithoutCoords.length > 0 && (
+        <div className="absolute bottom-2 right-2 z-20 bg-slate-900/90 backdrop-blur-sm border border-amber-500/30 text-amber-300 text-[10px] px-2.5 py-1 rounded-xl shadow-lg flex items-center gap-1.5 font-medium">
+          <span>⚠️ {stopsWithoutCoords.length} parada(s) sem coordenadas confirmadas (agrupadas por CEP/Bairro)</span>
         </div>
       )}
     </div>

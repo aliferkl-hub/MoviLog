@@ -16,7 +16,7 @@ export interface User {
   name: string;
   passwordHash: string;
   salt: string;
-  role: 'master_owner' | 'company_admin' | 'dispatcher' | 'driver' | 'operator' | 'concierge' | 'viewer';
+  role: 'master_owner' | 'company_admin' | 'dispatcher' | 'driver' | 'operator' | 'concierge' | 'financial' | 'client' | 'viewer';
   companyId: string | null;
   phone?: string;
   active: boolean;
@@ -382,6 +382,131 @@ export interface DeliveryRoute {
   }[];
 }
 
+// Fiscal & Tax Models
+export interface FiscalConfig {
+  id: string;
+  companyId: string;
+  cnpj: string;
+  razaoSocial: string;
+  nomeFantasia: string;
+  inscricaoEstadual: string;
+  inscricaoMunicipal: string;
+  regimeTributario: 'simples_nacional' | 'lucro_presumido' | 'lucro_real';
+  cnaePrincipal?: string;
+  enderecoFiscal: string;
+  numero: string;
+  bairro: string;
+  cidade: string;
+  uf: string;
+  cep: string;
+  ambiente: 'homologacao' | 'producao';
+  serieNFe: number;
+  proximoNumeroNFe: number;
+  serieCTe: number;
+  proximoNumeroCTe: number;
+  serieMDFe: number;
+  proximoNumeroMDFe: number;
+  serieNFSe: number;
+  proximoNumeroNFSe: number;
+  certificadoStatus: 'valido' | 'pendente' | 'vencido';
+  certificadoValidade?: string;
+  provedorIntegracao: 'simulador_homologacao' | 'focus_nfe' | 'nuvem_fiscal' | 'sefaz_direta';
+  apiKeyProvedor?: string;
+  atualizadoEm: string;
+}
+
+export interface FiscalItem {
+  itemNumero: number;
+  descricao: string;
+  ncm: string;
+  cfop: string;
+  quantidade: number;
+  unidadeMedida: string;
+  valorUnitario: number;
+  valorTotal: number;
+  aliquotaICMS: number;
+  valorICMS: number;
+}
+
+export interface FiscalDocument {
+  id: string;
+  companyId: string;
+  tipo: 'nfe' | 'nfce' | 'nfse' | 'cte' | 'mdfe';
+  numero: number;
+  serie: number;
+  chaveAcesso: string; // 44 digits
+  status: 'autorizado' | 'rejeitado' | 'cancelado' | 'contingencia' | 'processando';
+  dataEmissao: string;
+  protocoloAutorizacao: string;
+  ambiente: 'homologacao' | 'producao';
+  emitenteCNPJ: string;
+  emitenteRazao: string;
+  emitenteUF: string;
+  destinatarioNome: string;
+  destinatarioDocumento: string;
+  destinatarioEndereco: string;
+  destinatarioCidade: string;
+  destinatarioUF: string;
+  destinatarioCEP: string;
+  naturezaOperacao: string;
+  cfop: string;
+  itens: FiscalItem[];
+  valorTotalProdutos: number;
+  valorFrete: number;
+  valorSeguro: number;
+  valorOutros: number;
+  baseCalculoICMS: number;
+  valorICMS: number;
+  baseCalculoISS?: number;
+  valorISS?: number;
+  valorTotal: number;
+  deliveryId?: string;
+  shipmentId?: string;
+  xmlConteudo: string;
+  motivoCancelamento?: string;
+  eventos: {
+    id: string;
+    tipo: 'autorizacao' | 'cancelamento' | 'carta_correcao';
+    dataHora: string;
+    protocolo: string;
+    motivo: string;
+    usuario: string;
+  }[];
+  criadoEm: string;
+}
+
+// Financial & Cost Analysis Models
+export interface FinancialRecord {
+  id: string;
+  companyId: string;
+  tipo: 'receita' | 'despesa';
+  categoria: 'frete' | 'combustivel' | 'manutencao' | 'pedagio' | 'salario' | 'seguro' | 'aluguel_armazem' | 'outros';
+  descricao: string;
+  valor: number;
+  dataCompetencia: string;
+  status: 'pendente' | 'pago' | 'conciliado';
+  routeId?: string;
+  vehicleId?: string;
+  deliveryId?: string;
+  fiscalDocId?: string;
+  comprovanteRef?: string;
+  observacoes?: string;
+  criadoEm: string;
+}
+
+// Global Operational Notifications
+export interface NotificationItem {
+  id: string;
+  companyId?: string | null;
+  tipo: 'entrega' | 'fiscal' | 'frota' | 'portaria' | 'sistema';
+  titulo: string;
+  mensagem: string;
+  lida: boolean;
+  prioridade: 'baixa' | 'media' | 'alta' | 'urgente';
+  link?: string;
+  dataHora: string;
+}
+
 export interface DatabaseSchema {
   users: User[];
   companies: Company[];
@@ -399,6 +524,10 @@ export interface DatabaseSchema {
   condoUnits: CondoUnit[];
   condoPackages: CondoPackage[];
   condoVisitors: CondoVisitor[];
+  fiscalConfigs: FiscalConfig[];
+  fiscalDocuments: FiscalDocument[];
+  financialRecords: FinancialRecord[];
+  notifications: NotificationItem[];
 }
 
 // Default Seed Data
@@ -530,9 +659,9 @@ const defaultPlans: CommercialPlan[] = [
 ];
 
 const defaultSystemConfig: SystemConfig = {
-  nomePlataforma: 'LogiPredial - Plataforma Integrada de Logística e Gestão Predial',
+  nomePlataforma: 'MoviLog - Movimento Inteligente. Controle Total.',
   whatsappComercial: '5511999999999',
-  mensagemWhatsappPadrao: 'Olá! Tenho interesse em contratar o plano [NOME DO PLANO] da plataforma LogiPredial.\n\nEmpresa: [NOME DA EMPRESA]\nCNPJ, quando aplicável: [CNPJ]\nPlano selecionado: [PLANO]\nValor informado: [VALOR]\nPeríodo contratado: [PERÍODO]\n\nGostaria de receber as instruções para pagamento e ativação.',
+  mensagemWhatsappPadrao: 'Olá! Tenho interesse em contratar a plataforma MoviLog.\n\nEmpresa: [NOME DA EMPRESA]\nCNPJ: [CNPJ]\nPlano: [PLANO]\n\nGostaria de receber instruções para ativação imediata.',
   diasDemonstracao: 7,
   masterEmail: 'Alifermadeiro@hotmail.com',
   masterInitialized: false,
@@ -568,10 +697,46 @@ class Database {
           routes: parsed.routes || [],
           condoUnits: parsed.condoUnits || [],
           condoPackages: parsed.condoPackages || [],
-          condoVisitors: parsed.condoVisitors || []
+          condoVisitors: parsed.condoVisitors || [],
+          fiscalConfigs: parsed.fiscalConfigs || [],
+          fiscalDocuments: parsed.fiscalDocuments || [],
+          financialRecords: parsed.financialRecords || [],
+          notifications: parsed.notifications || []
         };
       } catch (err) {
-        console.error('Error loading db.json, fallback to defaults:', err);
+        console.error('Error loading db.json, attempting backup_db.json fallback:', err);
+        const backupFile = path.resolve(DATA_DIR, 'backup_db.json');
+        if (fs.existsSync(backupFile)) {
+          try {
+            const rawBackup = fs.readFileSync(backupFile, 'utf-8');
+            const parsedBackup = JSON.parse(rawBackup);
+            console.log('Dados restaurados com sucesso a partir da cópia de segurança (backup_db.json)');
+            return {
+              users: parsedBackup.users || [],
+              companies: parsedBackup.companies || [],
+              plans: parsedBackup.plans && parsedBackup.plans.length > 0 ? parsedBackup.plans : defaultPlans,
+              systemConfig: parsedBackup.systemConfig || defaultSystemConfig,
+              payments: parsedBackup.payments || [],
+              auditLogs: parsedBackup.auditLogs || [],
+              logisticsReceipts: parsedBackup.logisticsReceipts || [],
+              inventory: parsedBackup.inventory || [],
+              stockMovements: parsedBackup.stockMovements || [],
+              shipments: parsedBackup.shipments || [],
+              deliveries: parsedBackup.deliveries || [],
+              vehicles: parsedBackup.vehicles || [],
+              routes: parsedBackup.routes || [],
+              condoUnits: parsedBackup.condoUnits || [],
+              condoPackages: parsedBackup.condoPackages || [],
+              condoVisitors: parsedBackup.condoVisitors || [],
+              fiscalConfigs: parsedBackup.fiscalConfigs || [],
+              fiscalDocuments: parsedBackup.fiscalDocuments || [],
+              financialRecords: parsedBackup.financialRecords || [],
+              notifications: parsedBackup.notifications || []
+            };
+          } catch (backupErr) {
+            console.error('Falha ao carregar backup_db.json:', backupErr);
+          }
+        }
       }
     }
 
@@ -591,7 +756,11 @@ class Database {
       routes: [],
       condoUnits: [],
       condoPackages: [],
-      condoVisitors: []
+      condoVisitors: [],
+      fiscalConfigs: [],
+      fiscalDocuments: [],
+      financialRecords: [],
+      notifications: []
     };
     this.saveData(initial);
     return initial;
@@ -601,6 +770,14 @@ class Database {
     const tempFile = `${DB_FILE}.tmp.${Date.now()}`;
     fs.writeFileSync(tempFile, JSON.stringify(data, null, 2), 'utf-8');
     fs.renameSync(tempFile, DB_FILE);
+
+    // Maintain defensive persistent backup copy
+    try {
+      const backupFile = path.resolve(DATA_DIR, 'backup_db.json');
+      fs.copyFileSync(DB_FILE, backupFile);
+    } catch {
+      // Ignore backup copy non-fatal errors
+    }
   }
 
   public save(): void {
@@ -623,6 +800,10 @@ class Database {
   public get condoUnits() { return this.data.condoUnits; }
   public get condoPackages() { return this.data.condoPackages; }
   public get condoVisitors() { return this.data.condoVisitors; }
+  public get fiscalConfigs() { return this.data.fiscalConfigs; }
+  public get fiscalDocuments() { return this.data.fiscalDocuments; }
+  public get financialRecords() { return this.data.financialRecords; }
+  public get notifications() { return this.data.notifications; }
 
   public logAudit(log: Omit<AuditLog, 'id' | 'timestamp'>): void {
     const entry: AuditLog = {
@@ -718,3 +899,39 @@ export function destroySession(token: string): void {
   sessions.delete(token);
   saveSessions(sessions);
 }
+
+// Brazilian SEFAZ 44-digit Access Key Generator with Modulo 11 DV
+export function generateChaveAcessoNFe(params: {
+  cUF: string; // 2 digits (e.g., '35' for SP)
+  anoMes: string; // 4 digits (e.g., '2610')
+  cnpj: string; // 14 digits
+  modelo: string; // 2 digits (55=NFe, 57=CTe, 58=MDFe, 65=NFCe)
+  serie: number; // 1..999
+  numero: number; // 1..999999999
+  tpEmis?: string; // '1' = Normal
+  codigoNumerico?: string; // 8 digits
+}): string {
+  const cUF = (params.cUF || '35').padStart(2, '0');
+  const anoMes = (params.anoMes || new Date().toISOString().slice(2, 4) + (new Date().getMonth() + 1).toString().padStart(2, '0')).slice(0, 4);
+  const cleanCnpj = (params.cnpj || '00000000000191').replace(/\D/g, '').padStart(14, '0');
+  const mod = (params.modelo || '55').padStart(2, '0');
+  const serie = String(params.serie || 1).padStart(3, '0');
+  const nNF = String(params.numero || 1).padStart(9, '0');
+  const tpEmis = params.tpEmis || '1';
+  const cNF = params.codigoNumerico || String(Math.floor(10000000 + Math.random() * 90000000));
+  
+  const baseKey = `${cUF}${anoMes}${cleanCnpj}${mod}${serie}${nNF}${tpEmis}${cNF}`;
+  
+  // Modulo 11 check digit (multipliers 2 to 9, right to left)
+  let sum = 0;
+  let weight = 2;
+  for (let i = baseKey.length - 1; i >= 0; i--) {
+    sum += parseInt(baseKey[i], 10) * weight;
+    weight = weight === 9 ? 2 : weight + 1;
+  }
+  const remainder = sum % 11;
+  const dv = (remainder === 0 || remainder === 1) ? 0 : 11 - remainder;
+  
+  return `${baseKey}${dv}`;
+}
+

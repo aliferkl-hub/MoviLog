@@ -83,7 +83,7 @@ export const ReportsView: React.FC = () => {
     const ws = XLSX.utils.json_to_sheet(dataToExport);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Relatorio_Entregas');
-    XLSX.writeFile(wb, `TheXLog_Relatorio_Operacional_${new Date().toISOString().split('T')[0]}.xlsx`);
+    XLSX.writeFile(wb, `MoviLog_Relatorio_Operacional_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
   return (

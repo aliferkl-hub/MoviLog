@@ -23,12 +23,13 @@ import {
   RefreshCw,
   FileText,
   UserCheck,
-  Check
+  Check,
+  Info
 } from 'lucide-react';
 
 export const DispatcherPlannerView: React.FC = () => {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<'planner' | 'published' | 'completed'>('planner');
+  const [activeTab, setActiveTab] = useState<'planner' | 'review' | 'published' | 'completed'>('planner');
 
   // Data
   const [pendingDeliveries, setPendingDeliveries] = useState<DeliveryItem[]>([]);
@@ -60,6 +61,12 @@ export const DispatcherPlannerView: React.FC = () => {
 
   // View single route modal / details
   const [viewingRoute, setViewingRoute] = useState<DeliveryRoute | null>(null);
+  const [plannerFeedback, setPlannerFeedback] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  const showPlannerFeedback = (text: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setPlannerFeedback({ text, type });
+    setTimeout(() => setPlannerFeedback(null), 5000);
+  };
 
   const loadData = async () => {
     setLoading(true);
@@ -124,11 +131,11 @@ export const DispatcherPlannerView: React.FC = () => {
   // Run Route Engine
   const handleRunPlanning = async () => {
     if (selectedDeliveryIds.length === 0) {
-      alert('Selecione pelo menos uma entrega pendente para planejar a rota.');
+      showPlannerFeedback('Selecione pelo menos uma entrega pendente para planejar a rota.', 'error');
       return;
     }
     if (!selectedVehicleId) {
-      alert('Selecione um veículo da frota.');
+      showPlannerFeedback('Selecione um veículo da frota.', 'error');
       return;
     }
 
@@ -150,8 +157,9 @@ export const DispatcherPlannerView: React.FC = () => {
         const v = vehicles.find(veh => veh.id === selectedVehicleId);
         setRouteTitle(`Rota ${v?.identificacao || 'Expresso'} - ${new Date().toLocaleDateString('pt-BR')}`);
       }
+      showPlannerFeedback('Sequência sugerida calculada com sucesso com base nas paradas e restrições.', 'success');
     } catch (err: any) {
-      alert(err.message || 'Erro ao calcular rota.');
+      showPlannerFeedback(err.message || 'Erro ao calcular rota.', 'error');
     } finally {
       setPlanningLoading(false);
     }
@@ -182,13 +190,13 @@ export const DispatcherPlannerView: React.FC = () => {
         tempoEstimadoMinutos: estimatedMin
       });
 
-      alert('Rota salva em preparação com sucesso!');
+      showPlannerFeedback('Rota salva em preparação com sucesso!', 'success');
       setSuggestedStops([]);
       setSelectedDeliveryIds([]);
       setRouteTitle('');
       await loadData();
     } catch (err: any) {
-      alert(err.message || 'Erro ao salvar rota.');
+      showPlannerFeedback(err.message || 'Erro ao salvar rota.', 'error');
     }
   };
 
@@ -196,7 +204,7 @@ export const DispatcherPlannerView: React.FC = () => {
   const handlePublishDirectly = async () => {
     if (suggestedStops.length === 0) return;
     if (!selectedDriverId) {
-      alert('Selecione um motorista responsável antes de publicar a rota.');
+      showPlannerFeedback('Selecione um motorista responsável antes de liberar a rota.', 'error');
       return;
     }
 
@@ -215,7 +223,7 @@ export const DispatcherPlannerView: React.FC = () => {
       // 2. Publish Route
       await api.publishRoute(created.route.id);
 
-      setPublishSuccess(`Rota ${created.route.codigoRota} publicada com sucesso para o motorista!`);
+      setPublishSuccess(`Rota ${created.route.codigoRota} aprovada e liberada com sucesso para o motorista!`);
       setTimeout(() => setPublishSuccess(null), 6000);
 
       // Reset
@@ -225,7 +233,7 @@ export const DispatcherPlannerView: React.FC = () => {
       await loadData();
       setActiveTab('published');
     } catch (err: any) {
-      alert(err.message || 'Erro ao publicar rota.');
+      showPlannerFeedback(err.message || 'Erro ao liberar rota.', 'error');
     } finally {
       setPublishLoading(false);
     }
@@ -239,8 +247,35 @@ export const DispatcherPlannerView: React.FC = () => {
     .filter(d => selectedDeliveryIds.includes(d.id))
     .reduce((acc, d) => acc + (d.volumes || 1), 0);
 
+  const reviewRoutes = routes.filter(r => r.status === 'em_preparacao' || r.status === 'em_revisao');
   const activeRoutes = routes.filter(r => r.status === 'publicada' || r.status === 'em_andamento');
   const completedRoutes = routes.filter(r => r.status === 'concluida');
+
+  const handleReviewRoute = async (routeId: string) => {
+    try {
+      await api.reviewRoute(routeId, 'Submissão formal para conferência do roteirista');
+      showPlannerFeedback('Rota colocada em revisão com sucesso!', 'success');
+      await loadData();
+      if (viewingRoute && viewingRoute.id === routeId) {
+        setViewingRoute(prev => prev ? { ...prev, status: 'em_revisao', versao: prev.versao + 1 } : null);
+      }
+    } catch (err: any) {
+      showPlannerFeedback(err.message || 'Erro ao submeter rota para revisão.', 'error');
+    }
+  };
+
+  const handleApproveAndPublish = async (routeId: string) => {
+    try {
+      await api.publishRoute(routeId);
+      showPlannerFeedback('Rota aprovada e liberada com sucesso para o entregador!', 'success');
+      await loadData();
+      if (viewingRoute && viewingRoute.id === routeId) {
+        setViewingRoute(prev => prev ? { ...prev, status: 'publicada', versao: prev.versao + 1 } : null);
+      }
+    } catch (err: any) {
+      showPlannerFeedback(err.message || 'Erro ao aprovar e liberar rota.', 'error');
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -253,14 +288,14 @@ export const DispatcherPlannerView: React.FC = () => {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 rounded-full flex items-center gap-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 bg-violet-500/20 text-violet-300 border border-violet-500/40 rounded-full flex items-center gap-1">
                   <Sparkles className="w-3 h-3 text-amber-400" />
-                  <span>LET’S LOG — Painel do Roteirista</span>
+                  <span>MoviLog — Painel do Roteirista</span>
                 </span>
-                <span className="text-xs text-slate-400">Motor Inteligente de Roteirização</span>
+                <span className="text-xs text-slate-400">Roteirização Otimizada & Despacho</span>
               </div>
               <h2 className="text-xl sm:text-2xl font-black text-white mt-0.5">
-                Planejamento & Despacho de Rotas
+                Planejamento, Revisão & Liberação de Rotas
               </h2>
             </div>
           </div>
@@ -275,6 +310,19 @@ export const DispatcherPlannerView: React.FC = () => {
             </button>
           </div>
         </div>
+
+        {plannerFeedback && (
+          <div className={`mt-4 p-3 rounded-2xl border text-xs font-semibold flex items-center justify-between gap-2 shadow-lg ${
+            plannerFeedback.type === 'success'
+              ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+              : plannerFeedback.type === 'error'
+              ? 'bg-rose-500/20 border-rose-500/40 text-rose-300'
+              : 'bg-sky-500/20 border-sky-500/40 text-sky-300'
+          }`}>
+            <span>{plannerFeedback.text}</span>
+            <button onClick={() => setPlannerFeedback(null)} className="text-slate-400 hover:text-white">✕</button>
+          </div>
+        )}
 
         {publishSuccess && (
           <div className="mt-4 p-3 bg-emerald-500/20 border border-emerald-500/40 rounded-2xl flex items-center gap-2 text-emerald-300 text-xs font-semibold">
@@ -298,6 +346,21 @@ export const DispatcherPlannerView: React.FC = () => {
           <span>Planejar Nova Rota</span>
           <span className="px-2 py-0.5 rounded-full text-[10px] bg-slate-900 text-slate-300 font-bold">
             {pendingDeliveries.length} pendentes
+          </span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('review')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+            activeTab === 'review'
+              ? 'bg-amber-600 text-white shadow-md'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+          }`}
+        >
+          <Clock className="w-3.5 h-3.5 text-amber-300" />
+          <span>Em Preparação & Revisão</span>
+          <span className="px-2 py-0.5 rounded-full text-[10px] bg-slate-900 text-slate-300 font-bold">
+            {reviewRoutes.length}
           </span>
         </button>
 
@@ -547,6 +610,14 @@ export const DispatcherPlannerView: React.FC = () => {
                   />
                 </div>
 
+                {/* Aviso Transparente de Roteirização */}
+                <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-start gap-2.5 text-xs text-amber-300">
+                  <Info className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div className="text-[11px] leading-relaxed">
+                    <strong className="text-amber-200">Aviso Operacional:</strong> A sequência sugerida é calculada por <strong>proximidade geográfica (distância geodésica)</strong> e não representa necessariamente a melhor rota considerando trânsito ao vivo, semáforos ou interdições viárias. O despachante pode reorganizar livremente as paradas antes da aprovação final.
+                  </div>
+                </div>
+
                 <div className="max-h-80 overflow-y-auto space-y-2 pr-1">
                   {suggestedStops.map((stop, idx) => (
                     <div
@@ -616,90 +687,175 @@ export const DispatcherPlannerView: React.FC = () => {
         </div>
       )}
 
-      {/* TAB 2 & 3: ROUTES LIST */}
-      {(activeTab === 'published' || activeTab === 'completed') && (
+      {/* TAB 2: REVIEW & PREPARATION */}
+      {activeTab === 'review' && (
         <div className="space-y-4">
-          {routes.filter(r => (activeTab === 'published' ? r.status !== 'concluida' : r.status === 'concluida')).length === 0 ? (
+          {reviewRoutes.length === 0 ? (
             <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center">
-              <Navigation className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-              <h3 className="text-base font-bold text-white mb-1">Nenhuma rota encontrada nesta categoria</h3>
+              <Clock className="w-12 h-12 text-slate-600 mx-auto mb-3" />
+              <h3 className="text-base font-bold text-white mb-1">Nenhuma rota em preparação ou revisão</h3>
               <p className="text-xs text-slate-400">
-                Utilize a aba "Planejar Nova Rota" para agrupar entregas e publicar rotas para a sua frota.
+                Rotas salvas em preparação ou submetidas para aprovação aparecerão aqui antes de serem liberadas para o motorista.
               </p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {routes
-                .filter(r => (activeTab === 'published' ? r.status !== 'concluida' : r.status === 'concluida'))
-                .map(route => {
-                  const isDone = route.status === 'concluida';
-                  const inProgress = route.status === 'em_andamento';
-
-                  return (
-                    <div
-                      key={route.id}
-                      className="bg-slate-900 border border-slate-800 rounded-3xl p-5 hover:border-slate-700 transition space-y-4"
-                    >
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <span className="font-mono text-xs font-bold text-sky-400">{route.codigoRota}</span>
-                          <span className="text-[10px] text-slate-500 ml-2">v{route.versao}</span>
-                          <h4 className="text-base font-bold text-white mt-1">{route.titulo}</h4>
-                        </div>
-
-                        <span
-                          className={`text-[10px] font-bold px-2.5 py-1 rounded-full border ${
-                            isDone
-                              ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                              : inProgress
-                              ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse'
-                              : 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
-                          }`}
-                        >
-                          {route.status === 'em_preparacao' && 'Em preparação'}
-                          {route.status === 'publicada' && 'Publicada (Aguardando motorista)'}
-                          {route.status === 'em_andamento' && 'Em andamento'}
-                          {route.status === 'concluida' && 'Concluída'}
-                        </span>
+              {reviewRoutes.map(route => {
+                const inReview = route.status === 'em_revisao';
+                return (
+                  <div
+                    key={route.id}
+                    className="bg-slate-900 border border-slate-800 rounded-3xl p-5 hover:border-slate-700 transition space-y-4 shadow-xl"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <span className="font-mono text-xs font-bold text-sky-400">{route.codigoRota}</span>
+                        <span className="text-[10px] text-slate-500 ml-2">v{route.versao}</span>
+                        <h4 className="text-base font-bold text-white mt-1">{route.titulo}</h4>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2 text-[11px] pt-1">
-                        <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
-                          <span className="text-slate-400 block text-[10px]">Motorista</span>
-                          <span className="font-bold text-white text-xs">{route.motoristaNome}</span>
-                        </div>
-                        <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
-                          <span className="text-slate-400 block text-[10px]">Veículo</span>
-                          <span className="font-bold text-white text-xs">{route.veiculoPlaca}</span>
-                        </div>
-                      </div>
+                      <span
+                        className={`text-[10px] font-bold px-2.5 py-1 rounded-full border ${
+                          inReview
+                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse'
+                            : 'bg-slate-800 text-slate-300 border-slate-700'
+                        }`}
+                      >
+                        {inReview ? 'Em Revisão do Roteirista' : 'Rascunho / Em Preparação'}
+                      </span>
+                    </div>
 
-                      <div className="flex items-center justify-between text-xs text-slate-400 bg-slate-950/60 p-3 rounded-2xl border border-slate-800">
-                        <span>{route.totalParadas} paradas</span>
-                        <span>{route.totalVolumes} volumes</span>
-                        <span>{route.totalPesoKg} kg</span>
+                    <div className="grid grid-cols-2 gap-2 text-[11px] pt-1">
+                      <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+                        <span className="text-slate-400 block text-[10px]">Motorista</span>
+                        <span className="font-bold text-white text-xs">{route.motoristaNome || 'A definir'}</span>
                       </div>
-
-                      <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-xs">
-                        <span className="text-slate-500">
-                          {new Date(route.criadaEm).toLocaleDateString('pt-BR')}
-                        </span>
-                        <button
-                          onClick={() => setViewingRoute(route)}
-                          className="px-3 py-1.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 text-xs font-semibold transition"
-                        >
-                          Ver Mapa & Paradas
-                        </button>
+                      <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+                        <span className="text-slate-400 block text-[10px]">Veículo</span>
+                        <span className="font-bold text-white text-xs">{route.veiculoPlaca}</span>
                       </div>
                     </div>
-                  );
-                })}
+
+                    <div className="flex items-center justify-between text-xs text-slate-400 bg-slate-950/60 p-3 rounded-2xl border border-slate-800">
+                      <span>{route.totalParadas} paradas</span>
+                      <span>{route.totalVolumes} volumes</span>
+                      <span>{route.totalPesoKg} kg</span>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800">
+                      {route.status === 'em_preparacao' && (
+                        <button
+                          onClick={() => handleReviewRoute(route.id)}
+                          className="flex-1 px-3 py-1.5 rounded-xl bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/30 text-xs font-semibold transition"
+                        >
+                          Submeter à Revisão
+                        </button>
+                      )}
+
+                      <button
+                        onClick={() => handleApproveAndPublish(route.id)}
+                        className="flex-1 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition shadow-md"
+                      >
+                        Aprovar & Liberar
+                      </button>
+
+                      <button
+                        onClick={() => setViewingRoute(route)}
+                        className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
+                        title="Ver Mapa e Paradas"
+                      >
+                        <Map className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
       )}
 
-      {/* MODAL: VER DETALHES DA ROTA */}
+      {/* TAB 3 & 4: PUBLISHED & COMPLETED ROUTES LIST */}
+      {(activeTab === 'published' || activeTab === 'completed') && (
+        <div className="space-y-4">
+          {(activeTab === 'published' ? activeRoutes : completedRoutes).length === 0 ? (
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center">
+              <Navigation className="w-12 h-12 text-slate-600 mx-auto mb-3" />
+              <h3 className="text-base font-bold text-white mb-1">Nenhuma rota encontrada nesta categoria</h3>
+              <p className="text-xs text-slate-400">
+                Utilize a aba "Planejar Nova Rota" para agrupar entregas e liberar rotas para a sua frota.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {(activeTab === 'published' ? activeRoutes : completedRoutes).map(route => {
+                const isDone = route.status === 'concluida';
+                const inProgress = route.status === 'em_andamento';
+
+                return (
+                  <div
+                    key={route.id}
+                    className="bg-slate-900 border border-slate-800 rounded-3xl p-5 hover:border-slate-700 transition space-y-4 shadow-xl"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <span className="font-mono text-xs font-bold text-sky-400">{route.codigoRota}</span>
+                        <span className="text-[10px] text-slate-500 ml-2">v{route.versao}</span>
+                        <h4 className="text-base font-bold text-white mt-1">{route.titulo}</h4>
+                      </div>
+
+                      <span
+                        className={`text-[10px] font-bold px-2.5 py-1 rounded-full border ${
+                          isDone
+                            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                            : inProgress
+                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse'
+                            : 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
+                        }`}
+                      >
+                        {route.status === 'publicada' && 'Liberada (Aguardando motorista)'}
+                        {route.status === 'em_andamento' && 'Em andamento'}
+                        {route.status === 'concluida' && 'Concluída'}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-[11px] pt-1">
+                      <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+                        <span className="text-slate-400 block text-[10px]">Motorista</span>
+                        <span className="font-bold text-white text-xs">{route.motoristaNome}</span>
+                      </div>
+                      <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+                        <span className="text-slate-400 block text-[10px]">Veículo</span>
+                        <span className="font-bold text-white text-xs">{route.veiculoPlaca}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between text-xs text-slate-400 bg-slate-950/60 p-3 rounded-2xl border border-slate-800">
+                      <span>{route.totalParadas} paradas</span>
+                      <span>{route.totalVolumes} volumes</span>
+                      <span>{route.totalPesoKg} kg</span>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-xs">
+                      <span className="text-slate-500">
+                        {new Date(route.criadaEm).toLocaleDateString('pt-BR')}
+                      </span>
+                      <button
+                        onClick={() => setViewingRoute(route)}
+                        className="px-3 py-1.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 text-xs font-semibold transition"
+                      >
+                        Ver Mapa & Paradas
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* MODAL: VER DETALHES DA ROTA & REVISÃO */}
       {viewingRoute && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4 overflow-y-auto">
           <div className="relative w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl text-slate-100 my-8 space-y-4">
@@ -710,19 +866,63 @@ export const DispatcherPlannerView: React.FC = () => {
               <X className="w-5 h-5" />
             </button>
 
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
               <div>
-                <span className="font-mono text-xs font-bold text-sky-400">{viewingRoute.codigoRota} (v{viewingRoute.versao})</span>
-                <h3 className="text-xl font-bold text-white">{viewingRoute.titulo}</h3>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-xs font-bold text-sky-400">{viewingRoute.codigoRota} (v{viewingRoute.versao})</span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 uppercase">
+                    Status: {viewingRoute.status}
+                  </span>
+                </div>
+                <h3 className="text-xl font-bold text-white mt-1">{viewingRoute.titulo}</h3>
                 <p className="text-xs text-slate-400">
-                  Motorista: {viewingRoute.motoristaNome} • Veículo: {viewingRoute.veiculoPlaca} ({viewingRoute.veiculoIdentificacao})
+                  Motorista: {viewingRoute.motoristaNome || 'A definir'} • Veículo: {viewingRoute.veiculoPlaca} ({viewingRoute.veiculoIdentificacao})
                 </p>
+              </div>
+
+              {/* Action in modal for review / approve */}
+              <div className="flex items-center gap-2">
+                {viewingRoute.status === 'em_preparacao' && (
+                  <button
+                    onClick={() => handleReviewRoute(viewingRoute.id)}
+                    className="px-3.5 py-2 rounded-xl bg-amber-600/30 hover:bg-amber-600/50 text-amber-300 border border-amber-500/30 text-xs font-bold transition"
+                  >
+                    Submeter à Revisão
+                  </button>
+                )}
+                {(viewingRoute.status === 'em_preparacao' || viewingRoute.status === 'em_revisao') && (
+                  <button
+                    onClick={() => handleApproveAndPublish(viewingRoute.id)}
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition shadow-md"
+                  >
+                    Aprovar & Liberar Rota
+                  </button>
+                )}
               </div>
             </div>
 
-            <RouteMap stops={viewingRoute.paradas} height="300px" />
+            <RouteMap stops={viewingRoute.paradas} height="320px" />
 
-            <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
+            {/* Audit Change History */}
+            {viewingRoute.historicoAlteracoes && viewingRoute.historicoAlteracoes.length > 0 && (
+              <div className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800 text-xs space-y-1.5">
+                <span className="font-bold text-slate-300 block text-[11px] uppercase tracking-wider">
+                  Histórico de Alterações, Versões & Aprovações
+                </span>
+                <div className="max-h-24 overflow-y-auto space-y-1 pr-1">
+                  {viewingRoute.historicoAlteracoes.map((h, i) => (
+                    <div key={i} className="flex items-center justify-between text-slate-400 text-[11px]">
+                      <span><strong>v{h.versao}</strong> • {h.alteradoPor}: {h.motivo}</span>
+                      <span className="font-mono text-[10px] text-slate-500">
+                        {new Date(h.dataHora).toLocaleString('pt-BR')}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="max-h-56 overflow-y-auto space-y-2 pr-1">
               {viewingRoute.paradas.map(stop => (
                 <div
                   key={stop.deliveryId}
