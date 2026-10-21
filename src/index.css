@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg-canvas: #17171D;
+    --bg-sidebar: #1D1B24;
+    --bg-panel: #25222D;
+    --border-color: #393442;
+    --violet-primary: #8B5CF6;
+    --violet-intense: #7C3AED;
+    --lavender: #C4B5FD;
+    --emerald-primary: #10B981;
+    --emerald-soft: #A7F3D0;
+    --text-primary: #F5F3FA;
+    --text-secondary: #AAA6B5;
+    --color-error: #EF4444;
+  }
+
+  body {
+    background-color: #17171D;
+    color: #F5F3FA;
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  }
+}
+
+/* Custom scrollbars matching the graphite & violet theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #17171D;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #393442;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #7C3AED;
+}

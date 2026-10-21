@@ -1,0 +1,6 @@
+{
+  "name": "LogiPredial - Plataforma Integrada de Logística, Expedição e Gestão Predial",
+  "description": "Plataforma SaaS profissional integrada para logística, expedição e conferência de mercadorias, aliada à gestão predial, controle de portaria, encomendas e acessos com gestão multiempresa e controle Master Owner.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

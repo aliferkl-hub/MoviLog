@@ -1,0 +1,217 @@
+[
+  {
+    "id": "F1-01",
+    "fase": "FASE 1",
+    "teste": "Inspeção do Master Owner e sessão persistente",
+    "resultado": "aprovado",
+    "evidencia": "Status 200 retornado com email Alifermadeiro@hotmail.com e papel master_owner",
+    "arquivoOuEndpoint": "/api/auth/me, server/db.ts"
+  },
+  {
+    "id": "F2-01",
+    "fase": "FASE 2",
+    "teste": "Cadastro manual de entrega com campos completos",
+    "resultado": "aprovado",
+    "evidencia": "Código LL-9621009 gerado com status 201 e geocodificação (-23.5678596, -46.6508179)",
+    "arquivoOuEndpoint": "POST /api/deliveries"
+  },
+  {
+    "id": "F2-02",
+    "fase": "FASE 2",
+    "teste": "Consulta da entrega pela API e verificação de empresa correta",
+    "resultado": "aprovado",
+    "evidencia": "Entrega encontrada na listagem com companyId=7e7ef3f8-1fd9-4697-a8d4-270a02b84d62 e status='pendente'",
+    "arquivoOuEndpoint": "GET /api/deliveries"
+  },
+  {
+    "id": "F2-03",
+    "fase": "FASE 2",
+    "teste": "Detecção e bloqueio de cadastro duplicado",
+    "resultado": "aprovado",
+    "evidencia": "Resposta HTTP 409 com mensagem: \"Possível duplicidade identificada: já existe a entrega LL-9621009 com mesmo destinatário e endereço nesta empresa.\"",
+    "arquivoOuEndpoint": "POST /api/deliveries"
+  },
+  {
+    "id": "F2-04",
+    "fase": "FASE 2",
+    "teste": "Rejeição de entrega com campos obrigatórios ausentes",
+    "resultado": "aprovado",
+    "evidencia": "Resposta HTTP 400 com erro: \"Dados obrigatórios ausentes: destinatário, telefone, endereço, número, bairro, cidade e CEP são necessários para cadastrar a entrega.\"",
+    "arquivoOuEndpoint": "POST /api/deliveries"
+  },
+  {
+    "id": "F2-05",
+    "fase": "FASE 2",
+    "teste": "Não invenção de coordenadas para localização inexistente",
+    "resultado": "aprovado",
+    "evidencia": "geocodificacaoStatus='falha', lat=undefined (não inventou coordenadas de São Paulo)",
+    "arquivoOuEndpoint": "POST /api/deliveries, server/geocoding.ts",
+    "correcaoRealizada": "Ajustada lógica em geocoding.ts para retornar status falha em vez de atribuir coordenadas padrão da capital SP"
+  },
+  {
+    "id": "F3-01",
+    "fase": "FASE 3",
+    "teste": "Agrupamento e roteirização Nearest-Neighbor com alerta de dados sem coordenadas",
+    "resultado": "aprovado",
+    "evidencia": "Retornadas 3 paradas sugeridas. Distância calculada: 2.3 km. Aviso emitido: \"1 entrega(s) possuem endereço sem coordenadas geográficas confirmadas. Foram agrupadas por CEP e bairro sem coordenadas inventadas.\"",
+    "arquivoOuEndpoint": "POST /api/routes/plan-suggest",
+    "correcaoRealizada": "Implementado agrupamento explícito por CEP/bairro para entregas sem coordenadas geográficas confirmadas"
+  },
+  {
+    "id": "F3-02",
+    "fase": "FASE 3",
+    "teste": "Detecção de excesso de capacidade de peso e volumes",
+    "resultado": "aprovado",
+    "evidencia": "capacityExceeded=true. Aviso: \"Capacidade de peso excedida: Carga total de 958.5 kg excede o limite do veículo de 650 kg.\"",
+    "arquivoOuEndpoint": "POST /api/routes/plan-suggest"
+  },
+  {
+    "id": "F3-03",
+    "fase": "FASE 3",
+    "teste": "Rota criada em preparação e impedida de execução sem publicação expressa",
+    "resultado": "aprovado",
+    "evidencia": "Rota ROT-2026-004 criada com status 'em_preparacao', totalParadas=2, versao=1",
+    "arquivoOuEndpoint": "POST /api/routes"
+  },
+  {
+    "id": "F3-04",
+    "fase": "FASE 3",
+    "teste": "Reorganização de paradas pelo roteirista com versionamento e histórico auditável",
+    "resultado": "aprovado",
+    "evidencia": "Versão incrementada para v2. Histórico: \"Ajuste de prioridade de atendimento pelo roteirista\" por Alifer Madeiro",
+    "arquivoOuEndpoint": "PUT /api/routes/:id"
+  },
+  {
+    "id": "F3-05",
+    "fase": "FASE 3",
+    "teste": "Bloqueio de publicação de rota por usuário sem perfil autorizado (driver)",
+    "resultado": "aprovado",
+    "evidencia": "HTTP 403 retornado com mensagem: \"Apenas roteiristas ou administradores da empresa têm permissão para publicar rotas.\"",
+    "arquivoOuEndpoint": "POST /api/routes/:id/publish",
+    "correcaoRealizada": "Adicionado middleware de verificação de permissão de role (master_owner, company_admin, dispatcher) na rota de publicação"
+  },
+  {
+    "id": "F3-06",
+    "fase": "FASE 3",
+    "teste": "Publicação oficial da rota pelo roteirista/administrador",
+    "resultado": "aprovado",
+    "evidencia": "Rota ROT-2026-004 atualizada para status 'publicada', versao=3",
+    "arquivoOuEndpoint": "POST /api/routes/:id/publish"
+  },
+  {
+    "id": "F4-01",
+    "fase": "FASE 4",
+    "teste": "Entregador visualiza exclusivamente a rota atribuída e paradas publicadas",
+    "resultado": "aprovado",
+    "evidencia": "Motorista Carlos Motorista Audit 1792554178898 recebeu a rota ROT-2026-004 com 2 paradas",
+    "arquivoOuEndpoint": "GET /api/driver/active-route"
+  },
+  {
+    "id": "F4-02",
+    "fase": "FASE 4",
+    "teste": "Geração de rota e integração para aplicativo de navegação externa (Google Maps/Waze)",
+    "resultado": "aprovado",
+    "evidencia": "URL de navegação gerada: https://www.google.com/maps/dir/?api=1&destination=-23.5527377,-46.6560256",
+    "arquivoOuEndpoint": "src/components/routing/DriverPanelView.tsx"
+  },
+  {
+    "id": "F4-03",
+    "fase": "FASE 4",
+    "teste": "Início oficial do deslocamento da rota pelo entregador",
+    "resultado": "aprovado",
+    "evidencia": "Rota alterada para 'em_andamento' com iniciadaEm=2026-10-21T03:43:00.844Z",
+    "arquivoOuEndpoint": "POST /api/routes/:id/start"
+  },
+  {
+    "id": "F4-04",
+    "fase": "FASE 4",
+    "teste": "Registro de entrega concluída com comprovante e documento do recebedor",
+    "resultado": "aprovado",
+    "evidencia": "Parada marcada como 'entregue' às 2026-10-21T03:43:00.846Z. Recebedor: Dr. Roberto Santos",
+    "arquivoOuEndpoint": "POST /api/routes/:id/stops/:stopIndex/status"
+  },
+  {
+    "id": "F4-05",
+    "fase": "FASE 4",
+    "teste": "Registro de tentativa sem sucesso com justificativa operacional",
+    "resultado": "aprovado",
+    "evidencia": "Parada marcada como 'tentativa_falha'. Motivo registrado: \"Destinatário ausente no horário informado\"",
+    "arquivoOuEndpoint": "POST /api/routes/:id/stops/:stopIndex/status"
+  },
+  {
+    "id": "F4-06",
+    "fase": "FASE 4",
+    "teste": "Bloqueio de alteração de parada de entrega por motorista não atribuído",
+    "resultado": "aprovado",
+    "evidencia": "HTTP 403 retornado com mensagem: \"Você não é o motorista atribuído a esta rota\"",
+    "arquivoOuEndpoint": "POST /api/routes/:id/stops/:stopIndex/status",
+    "correcaoRealizada": "Implementada validação estrita de route.motoristaId === req.user.id no endpoint de status de parada"
+  },
+  {
+    "id": "F5-01",
+    "fase": "FASE 5",
+    "teste": "Transmissão e registro de telemetria GPS com metadados de origem e tempo",
+    "resultado": "aprovado",
+    "evidencia": "Lat/Lng (-23.5615, -46.656), Vel: 42km/h, timestampDispositivo=\"2026-10-21T03:43:00.979Z\", recebidoEm=\"2026-10-21T03:43:00.980Z\"",
+    "arquivoOuEndpoint": "POST /api/fleet/vehicles/:id/location"
+  },
+  {
+    "id": "F5-02",
+    "fase": "FASE 5",
+    "teste": "Consulta de telemetria pelo painel da empresa autorizada",
+    "resultado": "aprovado",
+    "evidencia": "Veículo BRA2E19 com localização confirmada: -23.5615, -46.656",
+    "arquivoOuEndpoint": "GET /api/fleet/vehicles/:id/location"
+  },
+  {
+    "id": "F5-03",
+    "fase": "FASE 5",
+    "teste": "Validação e rejeição de coordenadas geográficas impossíveis",
+    "resultado": "aprovado",
+    "evidencia": "HTTP 400 retornado com erro: \"Coordenadas fora dos limites geográficos válidos (-90 a 90 de latitude, -180 a 180 de longitude)\"",
+    "arquivoOuEndpoint": "POST /api/fleet/vehicles/:id/location",
+    "correcaoRealizada": "Adicionada checagem de limites geográficos (-90..90 lat, -180..180 lng) e finitude numérica"
+  },
+  {
+    "id": "F5-04",
+    "fase": "FASE 5",
+    "teste": "Descarte e proteção contra telemetria recebida fora de ordem cronológica",
+    "resultado": "aprovado",
+    "evidencia": "HTTP 400 retornado: \"Pacote de telemetria descartado: leitura fora de ordem (timestamp do dispositivo anterior à última leitura registrada)\"",
+    "arquivoOuEndpoint": "POST /api/fleet/vehicles/:id/location",
+    "correcaoRealizada": "Implementada comparação de timestampDispositivo para impedir que pacotes atrasados sobrescrevam leituras recentes"
+  },
+  {
+    "id": "F5-05",
+    "fase": "FASE 5",
+    "teste": "Detecção de anomalia física de deslocamento / salto de coordenadas (anti-teletransporte)",
+    "resultado": "aprovado",
+    "evidencia": "HTTP 400 retornado: \"Anomalia de telemetria detectada: velocidade implícita de 217950000 km/h excede o limite operacional seguro (possível coordenada adulterada ou salto de sinal GPS).\"",
+    "arquivoOuEndpoint": "POST /api/fleet/vehicles/:id/location",
+    "correcaoRealizada": "Adicionado cálculo de velocidade implícita via fórmula de Haversine bloqueando deslocamentos impossíveis (>300 km/h)"
+  },
+  {
+    "id": "F5-06",
+    "fase": "FASE 5",
+    "teste": "Isolamento de telemetria contra acesso de usuários de outras empresas",
+    "resultado": "aprovado",
+    "evidencia": "HTTP 403 retornado: \"Acesso negado para este veículo\"",
+    "arquivoOuEndpoint": "POST /api/fleet/vehicles/:id/location"
+  },
+  {
+    "id": "F6-01",
+    "fase": "FASE 6",
+    "teste": "Gravação síncrona e integridade das entidades no armazenamento persistente (db.json)",
+    "resultado": "aprovado",
+    "evidencia": "Entrega LL-9621009, Rota ROT-2026-004 (status='concluida') e Veículo BRA2E19 gravados no disco",
+    "arquivoOuEndpoint": "data/db.json, server/db.ts"
+  },
+  {
+    "id": "F6-02",
+    "fase": "FASE 6",
+    "teste": "Tratamento de concorrência e requisições simultâneas sem corrupção",
+    "resultado": "aprovado",
+    "evidencia": "3 requisições simultâneas completadas com sucesso (status 200)",
+    "arquivoOuEndpoint": "server/api.ts, server/db.ts"
+  }
+]

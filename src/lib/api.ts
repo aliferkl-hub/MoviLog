@@ -1,0 +1,349 @@
+import {
+  User,
+  Company,
+  CommercialPlan,
+  PaymentRequest,
+  AuditLog,
+  LogisticsReceipt,
+  InventoryItem,
+  StockMovement,
+  ShipmentOrder,
+  DeliveryItem,
+  Vehicle,
+  DeliveryRoute,
+  RouteStop,
+  CondoUnit,
+  CondoPackage,
+  CondoVisitor,
+  MasterStats,
+  DashboardMetrics
+} from '../types';
+
+const TOKEN_KEY = 'logipredial_auth_token';
+
+export const getStoredToken = (): string | null => {
+  return localStorage.getItem(TOKEN_KEY);
+};
+
+export const setStoredToken = (token: string): void => {
+  localStorage.setItem(TOKEN_KEY, token);
+};
+
+export const removeStoredToken = (): void => {
+  localStorage.removeItem(TOKEN_KEY);
+};
+
+async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const token = getStoredToken();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options.headers as Record<string, string>),
+  };
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const response = await fetch(endpoint, {
+    ...options,
+    headers,
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    const errorMsg = data.error || `Erro ${response.status}: ${response.statusText}`;
+    const err = new Error(errorMsg) as Error & { status?: number; data?: any };
+    err.status = response.status;
+    err.data = data;
+    throw err;
+  }
+
+  return data as T;
+}
+
+export const api = {
+  // Auth
+  getAuthStatus: () => request<{ masterInitialized: boolean; masterEmail: string; plataforma: string }>('/api/auth/status'),
+  initMaster: (payload: { email: string; password: string; name: string; phone?: string }) =>
+    request<{ token: string; user: User; message: string }>('/api/auth/init-master', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  login: (payload: { email: string; password: string }) =>
+    request<{ token: string; user: User; company: Company | null }>('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getMe: () =>
+    request<{
+      user: User;
+      company: Company | null;
+      systemConfig: { whatsappComercial: string; nomePlataforma: string; diasDemonstracao: number };
+    }>('/api/auth/me'),
+  logout: () =>
+    request<{ message: string }>('/api/auth/logout', { method: 'POST' }),
+  registerCompany: (payload: any) =>
+    request<{ token: string; user: User; company: Company; message: string }>('/api/auth/register-company', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  // Public / Plans / WhatsApp
+  getPlans: () =>
+    request<{ plans: CommercialPlan[]; whatsappComercial: string; mensagemPadrao: string }>('/api/plans'),
+  requestSubscription: (payload: { planoId: string; metodoPagamento?: string; comprovanteReferencia?: string; periodoMeses?: number }) =>
+    request<{ message: string; payment: PaymentRequest }>('/api/subscription/request', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getQRCode: (text: string) =>
+    request<{ dataUrl: string; text: string }>(`/api/qrcode?text=${encodeURIComponent(text)}`),
+
+  // Master Owner
+  getMasterStats: () => request<MasterStats>('/api/master/stats'),
+  getMasterCompanies: () => request<{ companies: Company[] }>('/api/master/companies'),
+  updateMasterCompany: (id: string, payload: any) =>
+    request<{ company: Company; message: string }>(`/api/master/companies/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  getMasterPlans: () => request<{ plans: CommercialPlan[] }>('/api/master/plans'),
+  updateMasterPlan: (id: string, payload: Partial<CommercialPlan>) =>
+    request<{ plan: CommercialPlan; message: string }>(`/api/master/plans/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  createMasterPlan: (payload: Partial<CommercialPlan>) =>
+    request<{ plan: CommercialPlan; message: string }>('/api/master/plans', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getMasterConfig: () => request<{ config: any }>('/api/master/config'),
+  updateMasterConfig: (payload: any) =>
+    request<{ config: any; message: string }>('/api/master/config', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  getMasterPayments: () => request<{ payments: PaymentRequest[] }>('/api/master/payments'),
+  verifyPayment: (id: string, payload: { action: 'aprovar' | 'rejeitar'; observacoes?: string }) =>
+    request<{ message: string; payment: PaymentRequest; company?: Company }>(`/api/master/payments/${id}/verify`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getMasterAuditLogs: () => request<{ logs: AuditLog[] }>('/api/master/audit-logs'),
+  seedSampleData: () => request<{ message: string; sampleCompany?: Company }>('/api/seed-sample-data', { method: 'POST' }),
+
+  // Logistics
+  getReceipts: (companyId?: string) =>
+    request<{ receipts: LogisticsReceipt[] }>(companyId ? `/api/logistics/receipts?companyId=${companyId}` : '/api/logistics/receipts'),
+  createReceipt: (payload: any) =>
+    request<{ receipt: LogisticsReceipt }>('/api/logistics/receipts', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getInventory: (companyId?: string) =>
+    request<{ items: InventoryItem[] }>(companyId ? `/api/logistics/inventory?companyId=${companyId}` : '/api/logistics/inventory'),
+  saveInventoryItem: (payload: any) =>
+    request<{ item: InventoryItem }>('/api/logistics/inventory', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  recordStockMovement: (payload: any) =>
+    request<{ movement: StockMovement; item: InventoryItem }>('/api/logistics/movement', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getShipments: (companyId?: string) =>
+    request<{ shipments: ShipmentOrder[] }>(companyId ? `/api/logistics/shipments?companyId=${companyId}` : '/api/logistics/shipments'),
+  createShipment: (payload: any) =>
+    request<{ shipment: ShipmentOrder }>('/api/logistics/shipments', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateShipmentStatus: (id: string, payload: { status: string; ocorrenciaTexto?: string }) =>
+    request<{ shipment: ShipmentOrder }>(`/api/logistics/shipments/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+
+  // Condo & Concierge
+  getCondoUnits: (companyId?: string) =>
+    request<{ units: CondoUnit[] }>(companyId ? `/api/condo/units?companyId=${companyId}` : '/api/condo/units'),
+  saveCondoUnit: (payload: any) =>
+    request<{ unit: CondoUnit }>('/api/condo/units', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getCondoPackages: (companyId?: string) =>
+    request<{ packages: CondoPackage[] }>(companyId ? `/api/condo/packages?companyId=${companyId}` : '/api/condo/packages'),
+  receivePackage: (payload: any) =>
+    request<{ pkg: CondoPackage }>('/api/condo/packages', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  notifyPackageRecipient: (id: string) =>
+    request<{ message: string; pkg: CondoPackage; whatsappUrl: string }>(`/api/condo/packages/${id}/notify`, {
+      method: 'POST',
+    }),
+  pickupPackage: (id: string, payload: { pin: string; retiradoPor: string; documentoRetirada?: string }) =>
+    request<{ message: string; pkg: CondoPackage }>(`/api/condo/packages/${id}/pickup`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateCondoPackage: (id: string, payload: any) =>
+    request<{ message?: string; pkg: CondoPackage }>(`/api/condo/packages/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  getDashboardMetrics: (period: 'day' | 'week' | 'month' = 'week', companyId?: string) => {
+    const params = new URLSearchParams();
+    if (period) params.set('period', period);
+    if (companyId) params.set('companyId', companyId);
+    return request<DashboardMetrics>(`/api/dashboard/metrics?${params.toString()}`);
+  },
+  getCondoVisitors: (companyId?: string) =>
+    request<{ visitors: CondoVisitor[] }>(companyId ? `/api/condo/visitors?companyId=${companyId}` : '/api/condo/visitors'),
+  checkInVisitor: (payload: any) =>
+    request<{ visitor: CondoVisitor }>('/api/condo/visitors', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  checkOutVisitor: (id: string) =>
+    request<{ message: string; visitor: CondoVisitor }>(`/api/condo/visitors/${id}/checkout`, {
+      method: 'PATCH',
+    }),
+
+  // LET'S LOG — Deliveries & Spreadsheet Import
+  getDeliveries: (filters: Record<string, string> = {}) => {
+    const params = new URLSearchParams(filters);
+    return request<{ deliveries: DeliveryItem[] }>(`/api/deliveries?${params.toString()}`);
+  },
+  createDelivery: (payload: any) =>
+    request<{ message: string; delivery: DeliveryItem }>('/api/deliveries', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  importDeliveries: (rows: any[]) =>
+    request<{
+      message: string;
+      totalReceived: number;
+      acceptedCount: number;
+      rejectedCount: number;
+      accepted: DeliveryItem[];
+      rejected: any[];
+    }>('/api/deliveries/import', {
+      method: 'POST',
+      body: JSON.stringify({ rows }),
+    }),
+  updateDelivery: (id: string, payload: any) =>
+    request<{ message: string; delivery: DeliveryItem }>(`/api/deliveries/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  deleteDelivery: (id: string) =>
+    request<{ message: string }>(`/api/deliveries/${id}`, {
+      method: 'DELETE',
+    }),
+
+  // LET'S LOG — Fleet & GPS
+  getFleetVehicles: (companyId?: string) =>
+    request<{ vehicles: Vehicle[] }>(companyId ? `/api/fleet/vehicles?companyId=${companyId}` : '/api/fleet/vehicles'),
+  createVehicle: (payload: any) =>
+    request<{ message: string; vehicle: Vehicle }>('/api/fleet/vehicles', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateVehicle: (id: string, payload: any) =>
+    request<{ message: string; vehicle: Vehicle }>(`/api/fleet/vehicles/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  sendVehicleLocation: (id: string, location: { lat: number; lng: number; velocidade?: number; precisao?: number; bateria?: number; timestampDispositivo?: string }) =>
+    request<{ success: boolean; location: any }>(`/api/fleet/vehicles/${id}/location`, {
+      method: 'POST',
+      body: JSON.stringify(location),
+    }),
+  getVehicleLocation: (id: string) =>
+    request<{ veiculoId: string; placa: string; identificacao: string; ultimaLocalizacao: any }>(`/api/fleet/vehicles/${id}/location`),
+
+  // LET'S LOG — Route Planning & Execution
+  planRouteSuggestion: (payload: { deliveryIds: string[]; veiculoId: string }) =>
+    request<{
+      vehicle: Vehicle;
+      totalDeliveries: number;
+      totalVolumes: number;
+      totalWeightKg: number;
+      capacityExceeded: boolean;
+      warnings: string[];
+      estimatedDistanceKm: number;
+      estimatedDurationMin: number;
+      suggestedStops: RouteStop[];
+    }>('/api/routes/plan-suggest', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getRoutes: (companyId?: string) =>
+    request<{ routes: DeliveryRoute[] }>(companyId ? `/api/routes?companyId=${companyId}` : '/api/routes'),
+  getRouteById: (id: string) =>
+    request<{ route: DeliveryRoute; vehicle?: Vehicle }>(`/api/routes/${id}`),
+  createRoute: (payload: any) =>
+    request<{ message: string; route: DeliveryRoute }>('/api/routes', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateRoute: (id: string, payload: any) =>
+    request<{ message: string; route: DeliveryRoute }>(`/api/routes/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  publishRoute: (id: string) =>
+    request<{ message: string; route: DeliveryRoute }>(`/api/routes/${id}/publish`, {
+      method: 'POST',
+    }),
+  startRoute: (id: string) =>
+    request<{ message: string; route: DeliveryRoute }>(`/api/routes/${id}/start`, {
+      method: 'POST',
+    }),
+  updateStopStatus: (routeId: string, stopIndex: number, payload: any) =>
+    request<{ message: string; stop: RouteStop; route: DeliveryRoute }>(`/api/routes/${routeId}/stops/${stopIndex}/status`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getDriverActiveRoute: () =>
+    request<{ activeRoute: DeliveryRoute | null; vehicle?: Vehicle }>('/api/driver/active-route'),
+
+  // LET'S LOG — Company Team (Drivers, Dispatchers)
+  getCompanyUsers: (companyId?: string) =>
+    request<{ users: any[] }>(companyId ? `/api/company/users?companyId=${companyId}` : '/api/company/users'),
+  createCompanyUser: (payload: any) =>
+    request<{ message: string; user: any }>('/api/company/users', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+};
+
+// WhatsApp Sales helper generator
+export const buildWhatsAppSalesUrl = (
+  whatsappNumber: string,
+  planName: string,
+  companyName: string = '',
+  cnpj: string = '',
+  priceStr: string = '',
+  periodStr: string = 'Mensal',
+  solicitacaoId?: string
+): string => {
+  const cleanPhone = (whatsappNumber || '5511999999999').replace(/\D/g, '');
+  const solicitacaoLine = solicitacaoId ? `\nIdentificador da Solicitação: ${solicitacaoId}` : '';
+  const message = `Olá! Tenho interesse em contratar o plano ${planName} da plataforma LogiPredial.
+
+Empresa: ${companyName || 'Nova Empresa'}
+CNPJ, quando aplicável: ${cnpj || 'A informar'}
+Plano selecionado: ${planName}
+Valor informado: ${priceStr || 'A combinar'}
+Período contratado: ${periodStr}${solicitacaoLine}
+
+Gostaria de receber as instruções para pagamento e ativação.`;
+
+  return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
+};
