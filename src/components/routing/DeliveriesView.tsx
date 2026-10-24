@@ -27,9 +27,13 @@ import {
 
 interface DeliveriesViewProps {
   initialShowImport?: boolean;
+  initialShowManual?: boolean;
 }
 
-export const DeliveriesView: React.FC<DeliveriesViewProps> = ({ initialShowImport = false }) => {
+export const DeliveriesView: React.FC<DeliveriesViewProps> = ({
+  initialShowImport = false,
+  initialShowManual = false
+}) => {
   const { user, isMaster } = useAuth();
   const [deliveries, setDeliveries] = useState<DeliveryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -40,7 +44,7 @@ export const DeliveriesView: React.FC<DeliveriesViewProps> = ({ initialShowImpor
   const [searchTerm, setSearchTerm] = useState('');
 
   // Modals
-  const [showManualModal, setShowManualModal] = useState(false);
+  const [showManualModal, setShowManualModal] = useState(initialShowManual);
   const [showImportModal, setShowImportModal] = useState(initialShowImport);
   const [actionNotification, setActionNotification] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
 

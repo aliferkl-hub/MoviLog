@@ -41,3 +41,31 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #7C3AED;
 }
+
+/* Print Styles for Receipts, PODs, and Reports */
+@media print {
+  body {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  /* Hide navigation, sidebars and headers when printing */
+  header,
+  aside,
+  nav,
+  button,
+  .no-print {
+    display: none !important;
+  }
+
+  .lg\:pl-64 {
+    padding-left: 0 !important;
+  }
+
+  /* Force background colors and borders for printing */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
+

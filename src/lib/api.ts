@@ -20,7 +20,14 @@ import {
   FiscalConfig,
   FiscalDocument,
   FinancialRecord,
-  NotificationItem
+  NotificationItem,
+  CommercialProduct,
+  CommercialStockMovement,
+  CommercialSale,
+  CommercialCashSession,
+  CommercialSupplier,
+  CommercialPurchase,
+  CommercialDashboardMetrics
 } from '../types';
 
 const TOKEN_KEY = 'logipredial_auth_token';
@@ -322,6 +329,15 @@ export const api = {
   getDriverActiveRoute: () =>
     request<{ activeRoute: DeliveryRoute | null; vehicle?: Vehicle }>('/api/driver/active-route'),
 
+  // Company Profile & Settings
+  getCompanyProfile: () =>
+    request<{ company: Company }>('/api/company/profile'),
+  updateCompanyProfile: (payload: Partial<Company>) =>
+    request<{ message: string; company: Company }>('/api/company/profile', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
   // LET'S LOG — Company Team (Drivers, Dispatchers)
   getCompanyUsers: (companyId?: string) =>
     request<{ users: any[] }>(companyId ? `/api/company/users?companyId=${companyId}` : '/api/company/users'),
@@ -392,6 +408,99 @@ export const api = {
   // MoviLog — Rastreamento Público Seguro
   getPublicTracking: (code: string) =>
     request<any>(`/api/tracking/public/${encodeURIComponent(code)}`),
+
+  // Adega & Tabacaria Commercial Suite
+  getCommerceProducts: (modulo?: 'adega' | 'tabacaria') =>
+    request<{ products: CommercialProduct[] }>(modulo ? `/api/commerce/products?modulo=${modulo}` : '/api/commerce/products'),
+  createCommerceProduct: (data: Partial<CommercialProduct>) =>
+    request<{ success: boolean; product: CommercialProduct }>('/api/commerce/products', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateCommerceProduct: (id: string, data: Partial<CommercialProduct>) =>
+    request<{ success: boolean; product: CommercialProduct }>(`/api/commerce/products/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  deleteCommerceProduct: (id: string) =>
+    request<{ success: boolean; message: string }>(`/api/commerce/products/${id}`, {
+      method: 'DELETE',
+    }),
+  seedSampleCommerceProducts: (modulo: 'adega' | 'tabacaria') =>
+    request<{ success: boolean; count: number; message: string }>('/api/commerce/products/sample-seed', {
+      method: 'POST',
+      body: JSON.stringify({ modulo }),
+    }),
+  getCommerceStockMovements: (productId?: string) =>
+    request<{ movements: CommercialStockMovement[] }>(productId ? `/api/commerce/stock-movements?productId=${productId}` : '/api/commerce/stock-movements'),
+  adjustCommerceStock: (data: { productId: string; tipo: string; quantidade: number; motivo: string }) =>
+    request<{ success: boolean; movement: CommercialStockMovement; product: CommercialProduct }>('/api/commerce/stock/adjust', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getCurrentCashSession: (modulo?: 'adega' | 'tabacaria') =>
+    request<{ session: CommercialCashSession | null }>(modulo ? `/api/commerce/cash/current?modulo=${modulo}` : '/api/commerce/cash/current'),
+  openCashSession: (data: { saldoInicial: number; modulo?: 'adega' | 'tabacaria' }) =>
+    request<{ success: boolean; session: CommercialCashSession }>('/api/commerce/cash/open', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  addCashMovement: (sessionId: string, data: { tipo: 'suprimento' | 'sangria'; valor: number; motivo: string }) =>
+    request<{ success: boolean; session: CommercialCashSession }>(`/api/commerce/cash/${sessionId}/movement`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  closeCashSession: (sessionId: string, data: { saldoContadoDinheiro: number; observacoes?: string }) =>
+    request<{ success: boolean; session: CommercialCashSession; diferenca: number }>(`/api/commerce/cash/${sessionId}/close`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getCashHistory: () =>
+    request<{ sessions: CommercialCashSession[] }>('/api/commerce/cash/history'),
+  createCommerceSale: (data: {
+    modulo: 'adega' | 'tabacaria' | 'misto';
+    itens: { productId: string; quantidade: number; precoUnitario: number; desconto?: number }[];
+    formaPagamento: 'dinheiro' | 'pix' | 'cartao_credito' | 'cartao_debito' | 'misto';
+    valorPago?: number;
+    descontoGeral?: number;
+    clienteNome?: string;
+    clienteDocumento?: string;
+    verificacaoMaioridade: boolean;
+  }) =>
+    request<{ success: boolean; sale: CommercialSale }>('/api/commerce/sales', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getCommerceSales: (modulo?: 'adega' | 'tabacaria') =>
+    request<{ sales: CommercialSale[] }>(modulo ? `/api/commerce/sales?modulo=${modulo}` : '/api/commerce/sales'),
+  cancelCommerceSale: (id: string, data: { motivo: string }) =>
+    request<{ success: boolean; sale: CommercialSale }>(`/api/commerce/sales/${id}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getCommerceSuppliers: () =>
+    request<{ suppliers: CommercialSupplier[] }>('/api/commerce/suppliers'),
+  createCommerceSupplier: (data: Partial<CommercialSupplier>) =>
+    request<{ success: boolean; supplier: CommercialSupplier }>('/api/commerce/suppliers', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getCommercePurchases: () =>
+    request<{ purchases: CommercialPurchase[] }>('/api/commerce/purchases'),
+  createCommercePurchase: (data: {
+    fornecedorId: string;
+    fornecedorNome: string;
+    numeroNota?: string;
+    formaPagamento?: string;
+    observacoes?: string;
+    itens: { productId: string; quantidade: number; custoUnitario: number }[];
+  }) =>
+    request<{ success: boolean; purchase: CommercialPurchase }>('/api/commerce/purchases', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getCommerceDashboard: (modulo?: 'adega' | 'tabacaria') =>
+    request<CommercialDashboardMetrics>(modulo ? `/api/commerce/dashboard?modulo=${modulo}` : '/api/commerce/dashboard'),
 };
 
 // WhatsApp Sales helper generator

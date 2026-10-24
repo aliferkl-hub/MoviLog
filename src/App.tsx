@@ -35,9 +35,10 @@ import { UnitsView } from './components/condo/UnitsView';
 import { FiscalView } from './components/fiscal/FiscalView';
 import { FinancialView } from './components/financial/FinancialView';
 
-// Master & Management
 import { MasterDashboard } from './components/master/MasterDashboard';
 import { SettingsView } from './components/common/SettingsView';
+import { UsersView } from './components/common/UsersView';
+import { CommerceModuleView } from './components/commerce/CommerceModuleView';
 
 import { Loader2, ShieldCheck } from 'lucide-react';
 
@@ -64,19 +65,53 @@ const DashboardContent: React.FC = () => {
   }, [user?.id, user?.role]);
 
   const handleNavigate = (module: string, view?: string) => {
-    setCurrentModule(module);
-    if (view) {
-      setActiveView(view);
+    let targetModule = module;
+    let targetView = view;
+
+    // Normalize module and view aliases to avoid blank screens
+    if (['deliveries', 'import', 'planner', 'routes', 'map', 'fleet', 'drivers', 'clients', 'pod', 'occurrences', 'reports'].includes(module)) {
+      targetModule = 'routing';
+      if (!view) {
+        if (module === 'routes') targetView = 'planner';
+        else targetView = module;
+      }
+    } else if (['receipts', 'inventory', 'shipments'].includes(module)) {
+      targetModule = 'logistica';
+      if (!view) targetView = module;
+    } else if (['packages', 'visitors', 'units'].includes(module)) {
+      targetModule = 'predial';
+      if (!view) targetView = module;
+    } else if (module === 'fiscal' || module === 'documents') {
+      targetModule = 'fiscal';
+      if (!view) targetView = 'documents';
+    } else if (module === 'financial' || module === 'records') {
+      targetModule = 'financial';
+      if (!view) targetView = 'records';
+    } else if (module === 'driver') {
+      targetModule = 'driver';
+      if (!view) targetView = 'driver_panel';
+    } else if (module === 'users') {
+      targetModule = 'master';
+      targetView = 'users';
+    } else if (module === 'settings') {
+      targetModule = 'master';
+      targetView = 'settings';
+    }
+
+    setCurrentModule(targetModule);
+    if (targetView) {
+      setActiveView(targetView);
     } else {
       // Defaults
-      if (module === 'dashboard') setActiveView('overview');
-      else if (module === 'routing') setActiveView('deliveries');
-      else if (module === 'logistica') setActiveView('receipts');
-      else if (module === 'predial') setActiveView('packages');
-      else if (module === 'driver') setActiveView('driver_panel');
-      else if (module === 'fiscal') setActiveView('documents');
-      else if (module === 'financial') setActiveView('records');
-      else if (module === 'master') setActiveView('master_dashboard');
+      if (targetModule === 'dashboard') setActiveView('overview');
+      else if (targetModule === 'routing') setActiveView('deliveries');
+      else if (targetModule === 'logistica') setActiveView('receipts');
+      else if (targetModule === 'predial') setActiveView('packages');
+      else if (targetModule === 'driver') setActiveView('driver_panel');
+      else if (targetModule === 'fiscal') setActiveView('documents');
+      else if (targetModule === 'financial') setActiveView('records');
+      else if (targetModule === 'adega' || targetModule === 'tabacaria') setActiveView('pos');
+      else if (targetModule === 'master') setActiveView(isMaster ? 'master_dashboard' : 'settings');
     }
   };
 
@@ -134,10 +169,13 @@ const DashboardContent: React.FC = () => {
 
             {/* Routing & Deliveries Module */}
             {currentModule === 'routing' && activeView === 'deliveries' && (
-              <DeliveriesView initialShowImport={false} />
+              <DeliveriesView initialShowImport={false} initialShowManual={false} />
+            )}
+            {currentModule === 'routing' && activeView === 'create_manual' && (
+              <DeliveriesView initialShowImport={false} initialShowManual={true} />
             )}
             {currentModule === 'routing' && activeView === 'import' && (
-              <DeliveriesView initialShowImport={true} />
+              <DeliveriesView initialShowImport={true} initialShowManual={false} />
             )}
             {currentModule === 'routing' && activeView === 'planner' && (
               <DispatcherPlannerView />
@@ -198,8 +236,23 @@ const DashboardContent: React.FC = () => {
               <FinancialView />
             )}
 
+            {/* Commercial Modules: Adega & Tabacaria */}
+            {(currentModule === 'adega' || currentModule === 'tabacaria') && (
+              <CommerceModuleView
+                modulo={currentModule}
+                activeView={activeView}
+                onNavigate={handleNavigate}
+              />
+            )}
+
             {/* Master & Company Admin */}
-            {currentModule === 'master' && (
+            {currentModule === 'master' && activeView === 'users' && (
+              <UsersView />
+            )}
+            {currentModule === 'master' && activeView === 'settings' && (
+              <SettingsView />
+            )}
+            {currentModule === 'master' && (activeView === 'master_dashboard' || (!['users', 'settings'].includes(activeView))) && (
               isMaster ? <MasterDashboard /> : <SettingsView />
             )}
           </>

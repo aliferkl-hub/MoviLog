@@ -27,7 +27,9 @@ import {
   Send,
   DollarSign,
   QrCode,
-  UserPlus
+  UserPlus,
+  Wine,
+  Flame
 } from 'lucide-react';
 
 export interface TheXLogSidebarProps {
@@ -233,6 +235,27 @@ export const TheXLogSidebar: React.FC<TheXLogSidebarProps> = ({
       ]
     },
     {
+      title: 'Comércio & Varejo Especializado',
+      items: [
+        {
+          id: 'adega',
+          label: 'Módulo Adega & Bebidas',
+          icon: Wine,
+          allowedRoles: ['master_owner', 'company_admin', 'operator', 'dispatcher', 'financial'],
+          module: 'adega',
+          view: 'pos'
+        },
+        {
+          id: 'tabacaria',
+          label: 'Módulo Tabacaria & Headshop',
+          icon: Flame,
+          allowedRoles: ['master_owner', 'company_admin', 'operator', 'dispatcher', 'financial'],
+          module: 'tabacaria',
+          view: 'pos'
+        }
+      ]
+    },
+    {
       title: 'Gestão Financeira',
       items: [
         {
@@ -254,15 +277,31 @@ export const TheXLogSidebar: React.FC<TheXLogSidebarProps> = ({
       ]
     },
     {
-      title: 'Administração & Master',
+      title: 'Administração & Gestão',
       items: [
-        {
+        ...(isMaster ? [{
           id: 'master',
-          label: isMaster ? 'Painel Master Owner' : 'Configurações',
-          icon: isMaster ? ShieldCheck : Settings,
-          allowedRoles: ['master_owner', 'company_admin'],
+          label: 'Painel Master Owner',
+          icon: ShieldCheck,
+          allowedRoles: ['master_owner'],
           module: 'master',
           view: 'master_dashboard'
+        }] : []),
+        {
+          id: 'team_users',
+          label: 'Equipe & Colaboradores',
+          icon: Users,
+          allowedRoles: ['master_owner', 'company_admin', 'dispatcher'],
+          module: 'master',
+          view: 'users'
+        },
+        {
+          id: 'company_settings',
+          label: 'Configurações da Empresa',
+          icon: Settings,
+          allowedRoles: ['master_owner', 'company_admin'],
+          module: 'master',
+          view: 'settings'
         }
       ]
     }
@@ -276,7 +315,7 @@ export const TheXLogSidebar: React.FC<TheXLogSidebarProps> = ({
   const isCurrentActive = (m: string, v?: string) => {
     if (m === 'dashboard' && currentModule === 'dashboard') return true;
     if (m === 'driver' && currentModule === 'driver') return true;
-    if (m === 'master' && currentModule === 'master') return true;
+    if (m === 'master' && currentModule === 'master' && v === activeView) return true;
     if (m === 'fiscal' && currentModule === 'fiscal') return true;
     if (m === 'financial' && currentModule === 'financial') return true;
     if (m === 'logistica' && currentModule === 'logistica' && v === activeView) return true;

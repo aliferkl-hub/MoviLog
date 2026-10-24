@@ -1,8 +1,17 @@
-import { Router, Request, Response, NextFunction } from 'express';
+import express from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import QRCode from 'qrcode';
 import {
   db,
+  generateChaveAcessoNFe,
+  hashPassword,
+  verifyPassword,
+  createSession,
+  getSessionUser,
+  destroySession
+} from './db.ts';
+import type {
   User,
   Company,
   CommercialPlan,
@@ -22,16 +31,18 @@ import {
   FiscalDocument,
   FinancialRecord,
   NotificationItem,
-  generateChaveAcessoNFe,
-  hashPassword,
-  verifyPassword,
-  createSession,
-  getSessionUser,
-  destroySession
-} from './db.js';
-import { geocodeAddress, calculateDistanceKm } from './geocoding.js';
+  CommercialProduct,
+  CommercialStockMovement,
+  CommercialSale,
+  CommercialSaleItem,
+  CommercialCashSession,
+  CashMovement,
+  CommercialSupplier,
+  CommercialPurchase
+} from './db.ts';
+import { geocodeAddress, calculateDistanceKm } from './geocoding.ts';
 
-export const apiRouter = Router();
+export const apiRouter = express.Router();
 
 // Extend Request with authenticated user
 interface AuthRequest extends Request {
@@ -3266,8 +3277,91 @@ apiRouter.get('/driver/active-route', authenticate, (req: AuthRequest, res: Resp
 });
 
 // ==========================================
-// 9. COMPANY USERS (DISPATCHERS, DRIVERS, ADMINS)
+// 9. COMPANY PROFILE & USERS (DISPATCHERS, DRIVERS, ADMINS)
 // ==========================================
+
+// Get company profile
+apiRouter.get('/company/profile', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  const companyId = req.user!.role === 'master_owner' && req.query.companyId
+    ? (req.query.companyId as string)
+    : getEffectiveCompanyId(req);
+
+  const company = db.companies.find(c => c.id === companyId);
+  if (!company) {
+    res.status(404).json({ error: 'Empresa não encontrada.' });
+    return;
+  }
+
+  res.json({ company });
+});
+
+// Update company profile
+apiRouter.put('/company/profile', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  const companyId = req.user!.role === 'master_owner' && req.query.companyId
+    ? (req.query.companyId as string)
+    : getEffectiveCompanyId(req);
+
+  const company = db.companies.find(c => c.id === companyId);
+  if (!company) {
+    res.status(404).json({ error: 'Empresa não encontrada.' });
+    return;
+  }
+
+  const {
+    nomeFantasia,
+    razaoSocial,
+    cnpj,
+    telefone,
+    endereco,
+    segmento,
+    quantidadeFuncionarios,
+    responsavel
+  } = req.body;
+
+  if (nomeFantasia !== undefined) {
+    if (!String(nomeFantasia).trim()) {
+      res.status(400).json({ error: 'Nome Fantasia não pode ser vazio.' });
+      return;
+    }
+    company.nomeFantasia = String(nomeFantasia).trim();
+  }
+
+  if (razaoSocial !== undefined) {
+    if (!String(razaoSocial).trim()) {
+      res.status(400).json({ error: 'Razão Social não pode ser vazia.' });
+      return;
+    }
+    company.razaoSocial = String(razaoSocial).trim();
+  }
+
+  if (cnpj !== undefined) company.cnpj = String(cnpj).trim();
+  if (telefone !== undefined) company.telefone = String(telefone).trim();
+  if (endereco !== undefined) company.endereco = String(endereco).trim();
+  if (segmento !== undefined) company.segmento = String(segmento).trim();
+  if (responsavel !== undefined) company.responsavel = String(responsavel).trim();
+  if (quantidadeFuncionarios !== undefined) {
+    const qty = parseInt(quantidadeFuncionarios, 10);
+    if (!isNaN(qty) && qty >= 0) company.quantidadeFuncionarios = qty;
+  }
+
+  company.updatedAt = new Date().toISOString();
+  db.save();
+
+  db.logAudit({
+    userId: req.user!.id,
+    userEmail: req.user!.email,
+    userName: req.user!.name,
+    companyId: company.id,
+    acao: 'ATUALIZACAO_PERFIL_EMPRESA',
+    detalhes: `Perfil da empresa atualizado: ${company.nomeFantasia} (${company.cnpj || 'Sem CNPJ'})`,
+    ip: req.ip
+  });
+
+  res.json({
+    message: 'Perfil da empresa atualizado com sucesso!',
+    company
+  });
+});
 
 // List users of company
 apiRouter.get('/company/users', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
@@ -4237,5 +4331,1266 @@ apiRouter.get('/tracking/public/:code', async (req: Request, res: Response) => {
 
   res.status(404).json({ error: 'Nenhuma carga, entrega ou encomenda encontrada com o código informado.' });
 });
+
+// ==========================================
+// 14. MÓDULOS COMERCIAIS: ADEGA & TABACARIA
+// ==========================================
+
+// Helper: Ensure commercial collections exist in db
+const ensureCommercialCollections = () => {
+  if (!db.commercialProducts) (db as any).data.commercialProducts = [];
+  if (!db.commercialStockMovements) (db as any).data.commercialStockMovements = [];
+  if (!db.commercialSales) (db as any).data.commercialSales = [];
+  if (!db.commercialCashSessions) (db as any).data.commercialCashSessions = [];
+  if (!db.commercialSuppliers) (db as any).data.commercialSuppliers = [];
+  if (!db.commercialPurchases) (db as any).data.commercialPurchases = [];
+};
+
+// --- PRODUTOS ---
+
+// List products
+apiRouter.get('/commerce/products', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const { modulo, categoria, search, status, apenasEstoqueBaixo } = req.query;
+
+  let list = db.commercialProducts.filter(p => p.companyId === companyId);
+
+  if (modulo && (modulo === 'adega' || modulo === 'tabacaria')) {
+    list = list.filter(p => p.modulo === modulo);
+  }
+
+  if (categoria && typeof categoria === 'string' && categoria !== 'todas') {
+    list = list.filter(p => p.categoria.toLowerCase() === categoria.toLowerCase());
+  }
+
+  if (status && typeof status === 'string' && status !== 'todos') {
+    list = list.filter(p => (status === 'ativo' ? p.ativo : !p.ativo));
+  }
+
+  if (apenasEstoqueBaixo === 'true') {
+    list = list.filter(p => p.estoqueAtual <= p.estoqueMinimo);
+  }
+
+  if (search && typeof search === 'string' && search.trim()) {
+    const term = search.toLowerCase().trim();
+    list = list.filter(p =>
+      p.nome.toLowerCase().includes(term) ||
+      p.sku.toLowerCase().includes(term) ||
+      (p.codigoBarras && p.codigoBarras.includes(term)) ||
+      (p.marca && p.marca.toLowerCase().includes(term))
+    );
+  }
+
+  // Sort by name
+  list.sort((a, b) => a.nome.localeCompare(b.nome));
+
+  res.json({ products: list, total: list.length });
+});
+
+// Create product
+apiRouter.post('/commerce/products', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const {
+    modulo,
+    sku,
+    codigoBarras,
+    nome,
+    categoria,
+    descricao,
+    marca,
+    fornecedorId,
+    fornecedorNome,
+    precoCusto,
+    precoVenda,
+    estoqueAtual,
+    estoqueMinimo,
+    unidade,
+    fotoUrl,
+    idadeMinima
+  } = req.body;
+
+  if (!modulo || (modulo !== 'adega' && modulo !== 'tabacaria')) {
+    res.status(400).json({ error: 'Módulo inválido. Deve ser "adega" ou "tabacaria".' });
+    return;
+  }
+
+  if (!nome || !String(nome).trim()) {
+    res.status(400).json({ error: 'Nome do produto é obrigatório.' });
+    return;
+  }
+
+  if (!categoria || !String(categoria).trim()) {
+    res.status(400).json({ error: 'Categoria do produto é obrigatória.' });
+    return;
+  }
+
+  // Auto SKU if missing
+  const generatedSku = sku && String(sku).trim()
+    ? String(sku).trim().toUpperCase()
+    : `${modulo === 'adega' ? 'ADG' : 'TAB'}-${Date.now().toString().slice(-6)}`;
+
+  // Check unique SKU per company
+  const exists = db.commercialProducts.find(p => p.companyId === companyId && p.sku.toUpperCase() === generatedSku);
+  if (exists) {
+    res.status(409).json({ error: `Já existe um produto com o código SKU ${generatedSku} nesta empresa.` });
+    return;
+  }
+
+  const cost = parseFloat(precoCusto) >= 0 ? parseFloat(precoCusto) : 0;
+  const price = parseFloat(precoVenda) >= 0 ? parseFloat(precoVenda) : 0;
+  const stock = parseInt(estoqueAtual, 10) >= 0 ? parseInt(estoqueAtual, 10) : 0;
+  const minStock = parseInt(estoqueMinimo, 10) >= 0 ? parseInt(estoqueMinimo, 10) : 5;
+
+  // Determine age requirement (18+ for alcohol categories and tabacaria by default, unless explicitly non-alcoholic)
+  let minAge = 0;
+  if (modulo === 'tabacaria') {
+    minAge = 18;
+  } else {
+    const alcoholicCategories = ['cervejas', 'vinhos', 'destilados', 'bebidas alcoolicas', 'chopp', 'whisky', 'vodka'];
+    if (alcoholicCategories.some(c => categoria.toLowerCase().includes(c))) {
+      minAge = 18;
+    }
+  }
+  if (idadeMinima !== undefined) {
+    minAge = parseInt(idadeMinima, 10) || 0;
+  }
+
+  const newProduct: CommercialProduct = {
+    id: crypto.randomUUID(),
+    companyId,
+    modulo,
+    sku: generatedSku,
+    codigoBarras: codigoBarras ? String(codigoBarras).trim() : undefined,
+    nome: String(nome).trim(),
+    categoria: String(categoria).trim(),
+    descricao: descricao ? String(descricao).trim() : undefined,
+    marca: marca ? String(marca).trim() : undefined,
+    fornecedorId: fornecedorId || undefined,
+    fornecedorNome: fornecedorNome || undefined,
+    precoCusto: cost,
+    precoVenda: price,
+    estoqueAtual: stock,
+    estoqueMinimo: minStock,
+    unidade: unidade ? String(unidade).trim() : 'un',
+    fotoUrl: fotoUrl ? String(fotoUrl).trim() : undefined,
+    idadeMinima: minAge,
+    ativo: true,
+    criadoEm: new Date().toISOString(),
+    atualizadoEm: new Date().toISOString()
+  };
+
+  db.commercialProducts.push(newProduct);
+
+  // Record initial stock movement if > 0
+  if (stock > 0) {
+    const movement: CommercialStockMovement = {
+      id: crypto.randomUUID(),
+      companyId,
+      productId: newProduct.id,
+      productNome: newProduct.nome,
+      modulo: newProduct.modulo,
+      tipo: 'entrada_compra',
+      quantidade: stock,
+      quantidadeAnterior: 0,
+      quantidadeNova: stock,
+      motivo: 'Estoque inicial de cadastro de produto',
+      usuarioId: req.user!.id,
+      usuarioNome: req.user!.name,
+      criadoEm: new Date().toISOString()
+    };
+    db.commercialStockMovements.push(movement);
+  }
+
+  db.save();
+
+  db.logAudit({
+    userId: req.user!.id,
+    userEmail: req.user!.email,
+    userName: req.user!.name,
+    companyId,
+    acao: 'CADASTRO_PRODUTO_COMERCIAL',
+    detalhes: `Produto ${newProduct.nome} (${newProduct.sku}) cadastrado no módulo ${newProduct.modulo}. Estoque inicial: ${stock}`,
+    ip: req.ip
+  });
+
+  res.status(201).json({ message: 'Produto cadastrado com sucesso!', product: newProduct });
+});
+
+// Update product
+apiRouter.put('/commerce/products/:id', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const { id } = req.params;
+
+  const product = db.commercialProducts.find(p => p.id === id && p.companyId === companyId);
+  if (!product) {
+    res.status(404).json({ error: 'Produto não encontrado.' });
+    return;
+  }
+
+  const {
+    nome,
+    categoria,
+    descricao,
+    marca,
+    fornecedorId,
+    fornecedorNome,
+    codigoBarras,
+    precoCusto,
+    precoVenda,
+    estoqueMinimo,
+    unidade,
+    fotoUrl,
+    idadeMinima,
+    ativo
+  } = req.body;
+
+  if (nome !== undefined) product.nome = String(nome).trim();
+  if (categoria !== undefined) product.categoria = String(categoria).trim();
+  if (descricao !== undefined) product.descricao = String(descricao).trim();
+  if (marca !== undefined) product.marca = String(marca).trim();
+  if (fornecedorId !== undefined) product.fornecedorId = fornecedorId;
+  if (fornecedorNome !== undefined) product.fornecedorNome = fornecedorNome;
+  if (codigoBarras !== undefined) product.codigoBarras = String(codigoBarras).trim();
+  if (precoCusto !== undefined) product.precoCusto = parseFloat(precoCusto) >= 0 ? parseFloat(precoCusto) : product.precoCusto;
+  if (precoVenda !== undefined) product.precoVenda = parseFloat(precoVenda) >= 0 ? parseFloat(precoVenda) : product.precoVenda;
+  if (estoqueMinimo !== undefined) product.estoqueMinimo = parseInt(estoqueMinimo, 10) >= 0 ? parseInt(estoqueMinimo, 10) : product.estoqueMinimo;
+  if (unidade !== undefined) product.unidade = String(unidade).trim();
+  if (fotoUrl !== undefined) product.fotoUrl = String(fotoUrl).trim();
+  if (idadeMinima !== undefined) product.idadeMinima = parseInt(idadeMinima, 10) >= 0 ? parseInt(idadeMinima, 10) : product.idadeMinima;
+  if (ativo !== undefined) product.ativo = Boolean(ativo);
+
+  product.atualizadoEm = new Date().toISOString();
+  db.save();
+
+  db.logAudit({
+    userId: req.user!.id,
+    userEmail: req.user!.email,
+    userName: req.user!.name,
+    companyId,
+    acao: 'EDICAO_PRODUTO_COMERCIAL',
+    detalhes: `Produto ${product.nome} (${product.sku}) atualizado`,
+    ip: req.ip
+  });
+
+  res.json({ message: 'Produto atualizado com sucesso!', product });
+});
+
+// Delete / Deactivate product
+apiRouter.delete('/commerce/products/:id', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const { id } = req.params;
+
+  const product = db.commercialProducts.find(p => p.id === id && p.companyId === companyId);
+  if (!product) {
+    res.status(404).json({ error: 'Produto não encontrado.' });
+    return;
+  }
+
+  // Deactivate
+  product.ativo = false;
+  product.atualizadoEm = new Date().toISOString();
+  db.save();
+
+  db.logAudit({
+    userId: req.user!.id,
+    userEmail: req.user!.email,
+    userName: req.user!.name,
+    companyId,
+    acao: 'DESATIVACAO_PRODUTO_COMERCIAL',
+    detalhes: `Produto ${product.nome} (${product.sku}) desativado`,
+    ip: req.ip
+  });
+
+  res.json({ message: 'Produto desativado com sucesso!' });
+});
+
+// Seed sample products for testing/demonstration
+apiRouter.post('/commerce/products/sample-seed', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const { modulo } = req.body;
+
+  if (modulo !== 'adega' && modulo !== 'tabacaria') {
+    res.status(400).json({ error: 'Especifique modulo: "adega" ou "tabacaria".' });
+    return;
+  }
+
+  const sampleAdega = [
+    { sku: 'ADG-HEIN-L350', nome: 'Cerveja Heineken Lata 350ml', categoria: 'Cervejas', marca: 'Heineken', precoCusto: 4.20, precoVenda: 7.50, estoqueAtual: 72, estoqueMinimo: 24, unidade: 'lata', idadeMinima: 18 },
+    { sku: 'ADG-AMST-G600', nome: 'Cerveja Amstel Garrafa 600ml', categoria: 'Cervejas', marca: 'Amstel', precoCusto: 5.50, precoVenda: 10.00, estoqueAtual: 48, estoqueMinimo: 18, unidade: 'garrafa', idadeMinima: 18 },
+    { sku: 'ADG-VINC-750', nome: 'Vinho Tinto Concha y Toro Carmenere 750ml', categoria: 'Vinhos', marca: 'Concha y Toro', precoCusto: 28.00, precoVenda: 49.90, estoqueAtual: 14, estoqueMinimo: 6, unidade: 'garrafa', idadeMinima: 18 },
+    { sku: 'ADG-GIN-BOMBAY', nome: 'Gin Bombay Sapphire 750ml', categoria: 'Destilados', marca: 'Bombay', precoCusto: 75.00, precoVenda: 129.00, estoqueAtual: 8, estoqueMinimo: 4, unidade: 'garrafa', idadeMinima: 18 },
+    { sku: 'ADG-WHISKY-RED', nome: 'Whisky Johnnie Walker Red Label 1L', categoria: 'Destilados', marca: 'Johnnie Walker', precoCusto: 65.00, precoVenda: 109.90, estoqueAtual: 10, estoqueMinimo: 4, unidade: 'garrafa', idadeMinima: 18 },
+    { sku: 'ADG-VODK-SMIRN', nome: 'Vodka Smirnoff 998ml', categoria: 'Destilados', marca: 'Smirnoff', precoCusto: 29.50, precoVenda: 48.00, estoqueAtual: 16, estoqueMinimo: 6, unidade: 'garrafa', idadeMinima: 18 },
+    { sku: 'ADG-ENERG-REDB', nome: 'Energético Red Bull Energy Drink 250ml', categoria: 'Energéticos', marca: 'Red Bull', precoCusto: 6.80, precoVenda: 11.50, estoqueAtual: 40, estoqueMinimo: 15, unidade: 'lata', idadeMinima: 0 },
+    { sku: 'ADG-REFR-COCA2L', nome: 'Refrigerante Coca-Cola Original 2L', categoria: 'Refrigerantes', marca: 'Coca-Cola', precoCusto: 6.20, precoVenda: 10.00, estoqueAtual: 30, estoqueMinimo: 12, unidade: 'garrafa', idadeMinima: 0 },
+    { sku: 'ADG-AGUA-500', nome: 'Água Mineral Crystal Sem Gás 500ml', categoria: 'Água', marca: 'Crystal', precoCusto: 1.20, precoVenda: 3.00, estoqueAtual: 60, estoqueMinimo: 20, unidade: 'garrafa', idadeMinima: 0 },
+    { sku: 'ADG-GELO-5KG', nome: 'Gelo em Cubos Pacote 5kg', categoria: 'Gelo', marca: 'Gelo Polar', precoCusto: 6.00, precoVenda: 14.00, estoqueAtual: 22, estoqueMinimo: 10, unidade: 'pacote', idadeMinima: 0 }
+  ];
+
+  const sampleTabacaria = [
+    { sku: 'TAB-SEDA-RAW-K', nome: 'Seda RAW Classic King Size Slim', categoria: 'Sedas', marca: 'RAW', precoCusto: 4.50, precoVenda: 9.00, estoqueAtual: 50, estoqueMinimo: 15, unidade: 'pacote', idadeMinima: 18 },
+    { sku: 'TAB-SEDA-OCB-P', nome: 'Seda OCB Premium Black King Size', categoria: 'Sedas', marca: 'OCB', precoCusto: 4.20, precoVenda: 8.50, estoqueAtual: 45, estoqueMinimo: 15, unidade: 'pacote', idadeMinima: 18 },
+    { sku: 'TAB-ISQ-CLIPPER', nome: 'Isqueiro Clipper Recarregável Grande', categoria: 'Isqueiros', marca: 'Clipper', precoCusto: 5.00, precoVenda: 10.00, estoqueAtual: 35, estoqueMinimo: 12, unidade: 'un', idadeMinima: 18 },
+    { sku: 'TAB-ISQ-BIC-MAX', nome: 'Isqueiro BIC Maxi Tradicional', categoria: 'Isqueiros', marca: 'BIC', precoCusto: 3.50, precoVenda: 7.00, estoqueAtual: 60, estoqueMinimo: 20, unidade: 'un', idadeMinima: 18 },
+    { sku: 'TAB-FILT-YELLW', nome: 'Filtro Yellow Finger Algodão Extra Slim', categoria: 'Filtros', marca: 'Yellow Finger', precoCusto: 4.80, precoVenda: 9.50, estoqueAtual: 30, estoqueMinimo: 10, unidade: 'pacote', idadeMinima: 18 },
+    { sku: 'TAB-PIT-VIDRO', nome: 'Piteira de Vidro Borossilicato 6mm', categoria: 'Piteiras', marca: 'Squadafum', precoCusto: 7.00, precoVenda: 15.00, estoqueAtual: 25, estoqueMinimo: 8, unidade: 'un', idadeMinima: 18 },
+    { sku: 'TAB-PIT-PAPEL', nome: 'Piteira de Papel Perfurada Eco', categoria: 'Piteiras', marca: 'Elements', precoCusto: 2.80, precoVenda: 6.00, estoqueAtual: 40, estoqueMinimo: 15, unidade: 'pacote', idadeMinima: 18 },
+    { sku: 'TAB-DICH-ACRIL', nome: 'Triturador / Dichavador Acrílico Magnético', categoria: 'Acessórios', marca: 'Kings', precoCusto: 9.00, precoVenda: 18.00, estoqueAtual: 18, estoqueMinimo: 6, unidade: 'un', idadeMinima: 18 },
+    { sku: 'TAB-CINZ-ANTIF', nome: 'Cinzeiro de Silicone Antichamas', categoria: 'Acessórios', marca: 'Squadafum', precoCusto: 12.00, precoVenda: 25.00, estoqueAtual: 15, estoqueMinimo: 5, unidade: 'un', idadeMinima: 18 },
+    { sku: 'TAB-TABAC-ORGN', nome: 'Tabaco Orgânico Desfiado 25g', categoria: 'Charutos & Tabacos', marca: 'Hash', precoCusto: 11.50, precoVenda: 22.00, estoqueAtual: 20, estoqueMinimo: 8, unidade: 'pacote', idadeMinima: 18 }
+  ];
+
+  const source = modulo === 'adega' ? sampleAdega : sampleTabacaria;
+  let addedCount = 0;
+
+  source.forEach(item => {
+    const existing = db.commercialProducts.find(p => p.companyId === companyId && p.sku === item.sku);
+    if (!existing) {
+      const prod: CommercialProduct = {
+        id: crypto.randomUUID(),
+        companyId,
+        modulo,
+        sku: item.sku,
+        nome: item.nome,
+        categoria: item.categoria,
+        marca: item.marca,
+        precoCusto: item.precoCusto,
+        precoVenda: item.precoVenda,
+        estoqueAtual: item.estoqueAtual,
+        estoqueMinimo: item.estoqueMinimo,
+        unidade: item.unidade,
+        idadeMinima: item.idadeMinima,
+        ativo: true,
+        criadoEm: new Date().toISOString(),
+        atualizadoEm: new Date().toISOString()
+      };
+      db.commercialProducts.push(prod);
+
+      // Record stock movement
+      db.commercialStockMovements.push({
+        id: crypto.randomUUID(),
+        companyId,
+        productId: prod.id,
+        productNome: prod.nome,
+        modulo: prod.modulo,
+        tipo: 'entrada_compra',
+        quantidade: prod.estoqueAtual,
+        quantidadeAnterior: 0,
+        quantidadeNova: prod.estoqueAtual,
+        motivo: 'Carga de catálogo de exemplo inicial',
+        usuarioId: req.user!.id,
+        usuarioNome: req.user!.name,
+        criadoEm: new Date().toISOString()
+      });
+
+      addedCount++;
+    }
+  });
+
+  db.save();
+
+  res.json({
+    message: `${addedCount} produtos de exemplo adicionados com sucesso ao módulo ${modulo}!`,
+    addedCount
+  });
+});
+
+// --- ESTOQUE E AJUSTES ---
+
+// List stock movements
+apiRouter.get('/commerce/stock-movements', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const { modulo, productId } = req.query;
+
+  let list = db.commercialStockMovements.filter(m => m.companyId === companyId);
+
+  if (modulo && (modulo === 'adega' || modulo === 'tabacaria')) {
+    list = list.filter(m => m.modulo === modulo);
+  }
+
+  if (productId && typeof productId === 'string') {
+    list = list.filter(m => m.productId === productId);
+  }
+
+  list.sort((a, b) => new Date(b.criadoEm).getTime() - new Date(a.criadoEm).getTime());
+
+  res.json({ movements: list.slice(0, 200), total: list.length });
+});
+
+// Manual Stock Adjustment / Loss / Damage
+apiRouter.post('/commerce/stock/adjust', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const { productId, tipo, quantidade, motivo } = req.body;
+
+  if (!productId || !tipo || quantidade === undefined) {
+    res.status(400).json({ error: 'Produto, tipo de movimentação e quantidade são obrigatórios.' });
+    return;
+  }
+
+  if (!motivo || !String(motivo).trim()) {
+    res.status(400).json({ error: 'Justificativa do ajuste de estoque é obrigatória para fins de auditoria.' });
+    return;
+  }
+
+  const product = db.commercialProducts.find(p => p.id === productId && p.companyId === companyId);
+  if (!product) {
+    res.status(404).json({ error: 'Produto não encontrado.' });
+    return;
+  }
+
+  const qty = parseInt(quantidade, 10);
+  if (isNaN(qty) || qty === 0) {
+    res.status(400).json({ error: 'Quantidade deve ser um valor numérico diferente de zero.' });
+    return;
+  }
+
+  const qtdAnterior = product.estoqueAtual;
+  let qtdNova = qtdAnterior;
+
+  if (tipo === 'entrada_compra') {
+    qtdNova = qtdAnterior + Math.abs(qty);
+  } else if (tipo === 'saida_venda' || tipo === 'perda_avaria' || tipo === 'vencimento') {
+    if (qtdAnterior < Math.abs(qty)) {
+      res.status(400).json({ error: `Estoque insuficiente. Saldo atual: ${qtdAnterior}, saída solicitada: ${Math.abs(qty)}` });
+      return;
+    }
+    qtdNova = qtdAnterior - Math.abs(qty);
+  } else if (tipo === 'ajuste_manual') {
+    // If positive add, if negative subtract
+    qtdNova = qtdAnterior + qty;
+    if (qtdNova < 0) {
+      res.status(400).json({ error: `O estoque não pode ficar negativo. Saldo atual: ${qtdAnterior}, ajuste: ${qty}` });
+      return;
+    }
+  }
+
+  product.estoqueAtual = qtdNova;
+  product.atualizadoEm = new Date().toISOString();
+
+  const movement: CommercialStockMovement = {
+    id: crypto.randomUUID(),
+    companyId,
+    productId: product.id,
+    productNome: product.nome,
+    modulo: product.modulo,
+    tipo,
+    quantidade: qty,
+    quantidadeAnterior: qtdAnterior,
+    quantidadeNova: qtdNova,
+    motivo: String(motivo).trim(),
+    usuarioId: req.user!.id,
+    usuarioNome: req.user!.name,
+    criadoEm: new Date().toISOString()
+  };
+
+  db.commercialStockMovements.push(movement);
+  db.save();
+
+  db.logAudit({
+    userId: req.user!.id,
+    userEmail: req.user!.email,
+    userName: req.user!.name,
+    companyId,
+    acao: 'AJUSTE_ESTOQUE_COMERCIAL',
+    detalhes: `Ajuste (${tipo}) de ${product.nome}: anterior=${qtdAnterior}, novo=${qtdNova}. Motivo: ${motivo}`,
+    ip: req.ip
+  });
+
+  res.json({
+    message: 'Estoque atualizado com sucesso!',
+    product,
+    movement
+  });
+});
+
+// --- CAIXA E SESSÕES ---
+
+// Get current open session
+apiRouter.get('/commerce/cash/current', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const { modulo } = req.query;
+
+  let session = db.commercialCashSessions.find(c =>
+    c.companyId === companyId &&
+    c.status === 'aberto' &&
+    (!modulo || modulo === 'geral' || c.modulo === modulo || c.modulo === 'geral')
+  );
+
+  res.json({ session: session || null });
+});
+
+// Open Cash Session
+apiRouter.post('/commerce/cash/open', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const { modulo, saldoInicial } = req.body;
+
+  const targetModulo = modulo && ['adega', 'tabacaria', 'geral'].includes(modulo) ? modulo : 'geral';
+
+  // Check if session already open
+  const existing = db.commercialCashSessions.find(c =>
+    c.companyId === companyId &&
+    c.status === 'aberto' &&
+    (c.modulo === targetModulo || c.modulo === 'geral' || targetModulo === 'geral')
+  );
+
+  if (existing) {
+    res.status(409).json({
+      error: `Já existe uma sessão de caixa aberta (${existing.codigoSessao}) para este módulo. Feche-a antes de abrir uma nova.`,
+      session: existing
+    });
+    return;
+  }
+
+  const initialBalance = parseFloat(saldoInicial) >= 0 ? parseFloat(saldoInicial) : 0;
+  const countSessions = db.commercialCashSessions.filter(c => c.companyId === companyId).length + 1;
+  const code = `CX-${new Date().getFullYear()}-${String(countSessions).padStart(4, '0')}`;
+
+  const newSession: CommercialCashSession = {
+    id: crypto.randomUUID(),
+    codigoSessao: code,
+    companyId,
+    modulo: targetModulo,
+    operadorId: req.user!.id,
+    operadorNome: req.user!.name,
+    status: 'aberto',
+    abertoEm: new Date().toISOString(),
+    saldoInicial: initialBalance,
+    suprimentos: 0,
+    sangrias: 0,
+    totalVendasDinheiro: 0,
+    totalVendasPix: 0,
+    totalVendasCartao: 0,
+    totalVendasOutros: 0,
+    saldoEsperadoDinheiro: initialBalance,
+    movimentacoesManuais: []
+  };
+
+  db.commercialCashSessions.push(newSession);
+  db.save();
+
+  db.logAudit({
+    userId: req.user!.id,
+    userEmail: req.user!.email,
+    userName: req.user!.name,
+    companyId,
+    acao: 'ABERTURA_CAIXA',
+    detalhes: `Caixa ${newSession.codigoSessao} aberto com saldo inicial de R$ ${initialBalance.toFixed(2)} (${newSession.modulo})`,
+    ip: req.ip
+  });
+
+  res.status(201).json({ message: 'Caixa aberto com sucesso!', session: newSession });
+});
+
+// Cash manual movement (Sangria / Suprimento)
+apiRouter.post(['/commerce/cash/movement', '/commerce/cash/:id/movement'], authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const sessionId = req.params.id || req.body.sessionId;
+  const { tipo, valor, motivo, autorizadoPor } = req.body;
+
+  if (!sessionId || !tipo || !valor || !motivo) {
+    res.status(400).json({ error: 'Sessão de caixa, tipo (suprimento/sangria), valor e motivo são obrigatórios.' });
+    return;
+  }
+
+  const session = db.commercialCashSessions.find(c => c.id === sessionId && c.companyId === companyId);
+  if (!session || session.status !== 'aberto') {
+    res.status(404).json({ error: 'Sessão de caixa aberta não encontrada.' });
+    return;
+  }
+
+  const val = parseFloat(valor);
+  if (isNaN(val) || val <= 0) {
+    res.status(400).json({ error: 'O valor da movimentação deve ser maior que zero.' });
+    return;
+  }
+
+  if (tipo === 'sangria' && session.saldoEsperadoDinheiro < val) {
+    res.status(400).json({ error: `Saldo em dinheiro insuficiente para sangria. Saldo atual: R$ ${session.saldoEsperadoDinheiro.toFixed(2)}` });
+    return;
+  }
+
+  const movement: CashMovement = {
+    id: crypto.randomUUID(),
+    tipo: tipo === 'sangria' ? 'sangria' : 'suprimento',
+    valor: val,
+    motivo: String(motivo).trim(),
+    autorizadoPor: autorizadoPor ? String(autorizadoPor).trim() : req.user!.name,
+    dataHora: new Date().toISOString()
+  };
+
+  session.movimentacoesManuais.push(movement);
+
+  if (movement.tipo === 'suprimento') {
+    session.suprimentos += val;
+    session.saldoEsperadoDinheiro += val;
+  } else {
+    session.sangrias += val;
+    session.saldoEsperadoDinheiro -= val;
+  }
+
+  db.save();
+
+  db.logAudit({
+    userId: req.user!.id,
+    userEmail: req.user!.email,
+    userName: req.user!.name,
+    companyId,
+    acao: movement.tipo === 'sangria' ? 'SANGRIA_CAIXA' : 'SUPRIMENTO_CAIXA',
+    detalhes: `${movement.tipo.toUpperCase()} de R$ ${val.toFixed(2)} no caixa ${session.codigoSessao}. Motivo: ${motivo}`,
+    ip: req.ip
+  });
+
+  res.json({ message: `${movement.tipo === 'sangria' ? 'Sangria' : 'Suprimento'} registrado com sucesso!`, session });
+});
+
+// Close Cash Session
+apiRouter.post(['/commerce/cash/close', '/commerce/cash/:id/close'], authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const sessionId = req.params.id || req.body.sessionId;
+  const { saldoContadoDinheiro, observacoesFechamento } = req.body;
+
+  const session = db.commercialCashSessions.find(c => c.id === sessionId && c.companyId === companyId);
+  if (!session || session.status !== 'aberto') {
+    res.status(404).json({ error: 'Sessão de caixa aberta não encontrada.' });
+    return;
+  }
+
+  const counted = saldoContadoDinheiro !== undefined ? parseFloat(saldoContadoDinheiro) : session.saldoEsperadoDinheiro;
+  const diff = counted - session.saldoEsperadoDinheiro;
+
+  session.status = 'fechado';
+  session.fechadoEm = new Date().toISOString();
+  session.saldoContadoDinheiro = counted;
+  session.diferenca = diff;
+  session.observacoesFechamento = observacoesFechamento ? String(observacoesFechamento).trim() : undefined;
+
+  db.save();
+
+  db.logAudit({
+    userId: req.user!.id,
+    userEmail: req.user!.email,
+    userName: req.user!.name,
+    companyId,
+    acao: 'FECHAMENTO_CAIXA',
+    detalhes: `Caixa ${session.codigoSessao} fechado. Esperado: R$ ${session.saldoEsperadoDinheiro.toFixed(2)}, Contado: R$ ${counted.toFixed(2)}, Diferença: R$ ${diff.toFixed(2)}`,
+    ip: req.ip
+  });
+
+  res.json({ message: 'Caixa fechado com sucesso!', session });
+});
+
+// History of Cash Sessions
+apiRouter.get('/commerce/cash/history', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const { modulo } = req.query;
+
+  let list = db.commercialCashSessions.filter(c => c.companyId === companyId);
+  if (modulo && modulo !== 'geral') {
+    list = list.filter(c => c.modulo === modulo || c.modulo === 'geral');
+  }
+
+  list.sort((a, b) => new Date(b.abertoEm).getTime() - new Date(a.abertoEm).getTime());
+
+  res.json({ sessions: list.slice(0, 50) });
+});
+
+// --- PONTO DE VENDA (PDV) & VENDAS ---
+
+// Process Sale
+apiRouter.post('/commerce/sales', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const {
+    modulo,
+    itens,
+    formaPagamento,
+    valorPago,
+    descontoGeral,
+    clienteNome,
+    clienteDocumento,
+    verificacaoMaioridade
+  } = req.body;
+
+  if (!itens || !Array.isArray(itens) || itens.length === 0) {
+    res.status(400).json({ error: 'A venda deve conter pelo menos um item.' });
+    return;
+  }
+
+  if (!formaPagamento || !['dinheiro', 'pix', 'cartao_credito', 'cartao_debito', 'misto'].includes(formaPagamento)) {
+    res.status(400).json({ error: 'Forma de pagamento inválida.' });
+    return;
+  }
+
+  // Find or create auto cash session if none open
+  let activeSession = db.commercialCashSessions.find(c =>
+    c.companyId === companyId &&
+    c.status === 'aberto' &&
+    (!modulo || modulo === 'misto' || c.modulo === modulo || c.modulo === 'geral')
+  );
+
+  // Validate items and stocks
+  const saleItems: CommercialSaleItem[] = [];
+  let subtotal = 0;
+  let totalCost = 0;
+  let hasAgeRestrictedItem = false;
+
+  for (const item of itens) {
+    const product = db.commercialProducts.find(p => p.id === item.productId && p.companyId === companyId);
+    if (!product) {
+      res.status(404).json({ error: `Produto não localizado no estoque: ID ${item.productId}` });
+      return;
+    }
+
+    if (!product.ativo) {
+      res.status(400).json({ error: `O produto "${product.nome}" está desativado para venda.` });
+      return;
+    }
+
+    const qty = parseInt(item.quantidade, 10);
+    if (isNaN(qty) || qty <= 0) {
+      res.status(400).json({ error: `Quantidade inválida para o produto "${product.nome}".` });
+      return;
+    }
+
+    if (product.estoqueAtual < qty) {
+      res.status(400).json({
+        error: `Estoque insuficiente para "${product.nome}". Saldo disponível: ${product.estoqueAtual}, solicitado: ${qty}`
+      });
+      return;
+    }
+
+    if (product.idadeMinima >= 18) {
+      hasAgeRestrictedItem = true;
+    }
+
+    const unitPrice = parseFloat(item.precoUnitario) >= 0 ? parseFloat(item.precoUnitario) : product.precoVenda;
+    const itemDiscount = parseFloat(item.desconto) >= 0 ? parseFloat(item.desconto) : 0;
+    const itemSubtotal = unitPrice * qty;
+    const itemTotal = Math.max(0, itemSubtotal - itemDiscount);
+
+    subtotal += itemSubtotal;
+    totalCost += product.precoCusto * qty;
+
+    saleItems.push({
+      productId: product.id,
+      sku: product.sku,
+      nome: product.nome,
+      categoria: product.categoria,
+      quantidade: qty,
+      precoUnitario: unitPrice,
+      precoCusto: product.precoCusto,
+      subtotal: itemSubtotal,
+      desconto: itemDiscount,
+      total: itemTotal
+    });
+  }
+
+  // Legal Compliance: Check age verification flag
+  if (hasAgeRestrictedItem && !verificacaoMaioridade) {
+    res.status(403).json({
+      error: 'Venda bloqueada por conformidade legal: O carrinho contém produtos restritos para maiores de 18 anos (Lei Federal nº 9.294/1996 e Lei nº 8.069/1990). É obrigatório confirmar a verificação de idade do cliente.'
+    });
+    return;
+  }
+
+  const generalDiscount = parseFloat(descontoGeral) >= 0 ? parseFloat(descontoGeral) : 0;
+  const itemsDiscount = saleItems.reduce((acc, i) => acc + i.desconto, 0);
+  const totalDiscount = itemsDiscount + generalDiscount;
+  const valorTotal = Math.max(0, subtotal - totalDiscount);
+  const lucroBrutoEstimado = valorTotal - totalCost;
+
+  const countSales = db.commercialSales.filter(s => s.companyId === companyId).length + 1;
+  const prefix = modulo === 'adega' ? 'VDA-ADE' : modulo === 'tabacaria' ? 'VDA-TAB' : 'VDA-COM';
+  const codigoVenda = `${prefix}-${new Date().getFullYear()}-${String(countSales).padStart(5, '0')}`;
+
+  const paidAmount = valorPago ? parseFloat(valorPago) : valorTotal;
+  const change = Math.max(0, paidAmount - valorTotal);
+
+  // Atomically decrement stock
+  for (const item of saleItems) {
+    const product = db.commercialProducts.find(p => p.id === item.productId)!;
+    const qtdAnt = product.estoqueAtual;
+    product.estoqueAtual = qtdAnt - item.quantidade;
+    product.atualizadoEm = new Date().toISOString();
+
+    db.commercialStockMovements.push({
+      id: crypto.randomUUID(),
+      companyId,
+      productId: product.id,
+      productNome: product.nome,
+      modulo: product.modulo,
+      tipo: 'saida_venda',
+      quantidade: item.quantidade,
+      quantidadeAnterior: qtdAnt,
+      quantidadeNova: product.estoqueAtual,
+      motivo: `Venda ${codigoVenda}`,
+      usuarioId: req.user!.id,
+      usuarioNome: req.user!.name,
+      referenciaId: codigoVenda,
+      criadoEm: new Date().toISOString()
+    });
+  }
+
+  // Update cash session totals if active
+  if (activeSession) {
+    if (formaPagamento === 'dinheiro') {
+      activeSession.totalVendasDinheiro += valorTotal;
+      activeSession.saldoEsperadoDinheiro += valorTotal;
+    } else if (formaPagamento === 'pix') {
+      activeSession.totalVendasPix += valorTotal;
+    } else if (formaPagamento === 'cartao_credito' || formaPagamento === 'cartao_debito') {
+      activeSession.totalVendasCartao += valorTotal;
+    } else {
+      activeSession.totalVendasOutros += valorTotal;
+    }
+  }
+
+  const sale: CommercialSale = {
+    id: crypto.randomUUID(),
+    codigoVenda,
+    companyId,
+    modulo: modulo || 'adega',
+    itens: saleItems,
+    subtotal,
+    descontoTotal: totalDiscount,
+    valorTotal,
+    custoTotalEstimado: totalCost,
+    lucroBrutoEstimado,
+    formaPagamento,
+    valorPago: paidAmount,
+    troco: change,
+    caixaSessionId: activeSession ? activeSession.id : undefined,
+    status: 'concluida',
+    clienteNome: clienteNome ? String(clienteNome).trim() : undefined,
+    clienteDocumento: clienteDocumento ? String(clienteDocumento).trim() : undefined,
+    verificacaoMaioridade: Boolean(verificacaoMaioridade),
+    operadorId: req.user!.id,
+    operadorNome: req.user!.name,
+    criadoEm: new Date().toISOString()
+  };
+
+  db.commercialSales.push(sale);
+  db.save();
+
+  db.logAudit({
+    userId: req.user!.id,
+    userEmail: req.user!.email,
+    userName: req.user!.name,
+    companyId,
+    acao: 'VENDA_PDV_CONCLUIDA',
+    detalhes: `Venda ${sale.codigoVenda} realizada no valor de R$ ${sale.valorTotal.toFixed(2)} (${sale.formaPagamento.toUpperCase()}). ${saleItems.length} itens.`,
+    ip: req.ip
+  });
+
+  res.status(201).json({
+    message: 'Venda concluída com sucesso!',
+    sale
+  });
+});
+
+// List Sales
+apiRouter.get('/commerce/sales', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const { modulo, status, dataInicio, dataFim } = req.query;
+
+  let list = db.commercialSales.filter(s => s.companyId === companyId);
+
+  if (modulo && modulo !== 'todos' && modulo !== 'misto') {
+    list = list.filter(s => s.modulo === modulo);
+  }
+
+  if (status && status !== 'todos') {
+    list = list.filter(s => s.status === status);
+  }
+
+  if (dataInicio && typeof dataInicio === 'string') {
+    list = list.filter(s => s.criadoEm >= dataInicio);
+  }
+
+  if (dataFim && typeof dataFim === 'string') {
+    list = list.filter(s => s.criadoEm <= dataFim + 'T23:59:59.999Z');
+  }
+
+  list.sort((a, b) => new Date(b.criadoEm).getTime() - new Date(a.criadoEm).getTime());
+
+  res.json({ sales: list.slice(0, 100), total: list.length });
+});
+
+// Cancel Sale
+apiRouter.post('/commerce/sales/:id/cancel', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const { id } = req.params;
+  const { motivo } = req.body;
+
+  if (!motivo || !String(motivo).trim()) {
+    res.status(400).json({ error: 'Justificativa para cancelamento da venda é obrigatória.' });
+    return;
+  }
+
+  const sale = db.commercialSales.find(s => s.id === id && s.companyId === companyId);
+  if (!sale) {
+    res.status(404).json({ error: 'Venda não encontrada.' });
+    return;
+  }
+
+  if (sale.status === 'cancelada') {
+    res.status(400).json({ error: 'Esta venda já se encontra cancelada.' });
+    return;
+  }
+
+  sale.status = 'cancelada';
+  sale.motivoCancelamento = String(motivo).trim();
+  sale.canceladoEm = new Date().toISOString();
+  sale.canceladoPor = req.user!.name;
+
+  // Revert stock
+  for (const item of sale.itens) {
+    const product = db.commercialProducts.find(p => p.id === item.productId && p.companyId === companyId);
+    if (product) {
+      const qtdAnt = product.estoqueAtual;
+      product.estoqueAtual = qtdAnt + item.quantidade;
+      product.atualizadoEm = new Date().toISOString();
+
+      db.commercialStockMovements.push({
+        id: crypto.randomUUID(),
+        companyId,
+        productId: product.id,
+        productNome: product.nome,
+        modulo: product.modulo,
+        tipo: 'devolucao',
+        quantidade: item.quantidade,
+        quantidadeAnterior: qtdAnt,
+        quantidadeNova: product.estoqueAtual,
+        motivo: `Cancelamento da Venda ${sale.codigoVenda}: ${motivo}`,
+        usuarioId: req.user!.id,
+        usuarioNome: req.user!.name,
+        referenciaId: sale.codigoVenda,
+        criadoEm: new Date().toISOString()
+      });
+    }
+  }
+
+  // Adjust cash session if active
+  if (sale.caixaSessionId) {
+    const session = db.commercialCashSessions.find(c => c.id === sale.caixaSessionId && c.status === 'aberto');
+    if (session) {
+      if (sale.formaPagamento === 'dinheiro') {
+        session.totalVendasDinheiro = Math.max(0, session.totalVendasDinheiro - sale.valorTotal);
+        session.saldoEsperadoDinheiro = Math.max(0, session.saldoEsperadoDinheiro - sale.valorTotal);
+      } else if (sale.formaPagamento === 'pix') {
+        session.totalVendasPix = Math.max(0, session.totalVendasPix - sale.valorTotal);
+      } else if (sale.formaPagamento === 'cartao_credito' || sale.formaPagamento === 'cartao_debito') {
+        session.totalVendasCartao = Math.max(0, session.totalVendasCartao - sale.valorTotal);
+      }
+    }
+  }
+
+  db.save();
+
+  db.logAudit({
+    userId: req.user!.id,
+    userEmail: req.user!.email,
+    userName: req.user!.name,
+    companyId,
+    acao: 'CANCELAMENTO_VENDA_PDV',
+    detalhes: `Venda ${sale.codigoVenda} cancelada. Motivo: ${motivo}`,
+    ip: req.ip
+  });
+
+  res.json({ message: 'Venda cancelada com sucesso e estoque estornado!', sale });
+});
+
+// --- FORNECEDORES & COMPRAS ---
+
+// List Suppliers
+apiRouter.get('/commerce/suppliers', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const { segmento } = req.query;
+
+  let list = db.commercialSuppliers.filter(s => s.companyId === companyId);
+  if (segmento && (segmento === 'adega' || segmento === 'tabacaria')) {
+    list = list.filter(s => s.segmento === segmento || s.segmento === 'ambos');
+  }
+
+  list.sort((a, b) => a.nomeFantasia.localeCompare(b.nomeFantasia));
+  res.json({ suppliers: list });
+});
+
+// Create Supplier
+apiRouter.post('/commerce/suppliers', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const {
+    razaoSocial,
+    nomeFantasia,
+    cnpjCpf,
+    contatoNome,
+    telefone,
+    email,
+    endereco,
+    segmento,
+    observacoes
+  } = req.body;
+
+  if (!nomeFantasia || !String(nomeFantasia).trim()) {
+    res.status(400).json({ error: 'Nome fantasia do fornecedor é obrigatório.' });
+    return;
+  }
+
+  const supplier: CommercialSupplier = {
+    id: crypto.randomUUID(),
+    companyId,
+    razaoSocial: razaoSocial ? String(razaoSocial).trim() : String(nomeFantasia).trim(),
+    nomeFantasia: String(nomeFantasia).trim(),
+    cnpjCpf: cnpjCpf ? String(cnpjCpf).trim() : '',
+    contatoNome: contatoNome ? String(contatoNome).trim() : '',
+    telefone: telefone ? String(telefone).trim() : '',
+    email: email ? String(email).trim() : '',
+    endereco: endereco ? String(endereco).trim() : undefined,
+    segmento: segmento && ['adega', 'tabacaria', 'ambos'].includes(segmento) ? segmento : 'ambos',
+    observacoes: observacoes ? String(observacoes).trim() : undefined,
+    ativo: true,
+    criadoEm: new Date().toISOString()
+  };
+
+  db.commercialSuppliers.push(supplier);
+  db.save();
+
+  db.logAudit({
+    userId: req.user!.id,
+    userEmail: req.user!.email,
+    userName: req.user!.name,
+    companyId,
+    acao: 'CADASTRO_FORNECEDOR_COMERCIAL',
+    detalhes: `Fornecedor ${supplier.nomeFantasia} cadastrado`,
+    ip: req.ip
+  });
+
+  res.status(201).json({ message: 'Fornecedor cadastrado com sucesso!', supplier });
+});
+
+// List Purchases
+apiRouter.get('/commerce/purchases', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+
+  const list = db.commercialPurchases.filter(p => p.companyId === companyId);
+  list.sort((a, b) => new Date(b.dataCompra).getTime() - new Date(a.dataCompra).getTime());
+  res.json({ purchases: list });
+});
+
+// Register Purchase with auto stock increase
+apiRouter.post('/commerce/purchases', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const {
+    fornecedorId,
+    numeroNota,
+    dataCompra,
+    itens,
+    valorTotal,
+    formaPagamento,
+    observacoes
+  } = req.body;
+
+  if (!itens || !Array.isArray(itens) || itens.length === 0) {
+    res.status(400).json({ error: 'A compra deve conter ao menos um item.' });
+    return;
+  }
+
+  const supplier = db.commercialSuppliers.find(s => s.id === fornecedorId && s.companyId === companyId);
+  const fornecedorNome = supplier ? supplier.nomeFantasia : 'Fornecedor Diverso';
+
+  const purchaseItems: any[] = [];
+  let calculatedTotal = 0;
+
+  for (const item of itens) {
+    const product = db.commercialProducts.find(p => p.id === item.productId && p.companyId === companyId);
+    if (!product) {
+      res.status(404).json({ error: `Produto não encontrado: ID ${item.productId}` });
+      return;
+    }
+
+    const qty = parseInt(item.quantidade, 10);
+    const cost = parseFloat(item.custoUnitario) >= 0 ? parseFloat(item.custoUnitario) : product.precoCusto;
+    const itemTotal = qty * cost;
+    calculatedTotal += itemTotal;
+
+    purchaseItems.push({
+      productId: product.id,
+      nome: product.nome,
+      quantidade: qty,
+      custoUnitario: cost,
+      total: itemTotal
+    });
+
+    // Update product stock and cost
+    const qtdAnt = product.estoqueAtual;
+    product.estoqueAtual = qtdAnt + qty;
+    product.precoCusto = cost;
+    product.atualizadoEm = new Date().toISOString();
+
+    db.commercialStockMovements.push({
+      id: crypto.randomUUID(),
+      companyId,
+      productId: product.id,
+      productNome: product.nome,
+      modulo: product.modulo,
+      tipo: 'entrada_compra',
+      quantidade: qty,
+      quantidadeAnterior: qtdAnt,
+      quantidadeNova: product.estoqueAtual,
+      motivo: `Entrada por compra - NF ${numeroNota || 'S/N'} (${fornecedorNome})`,
+      usuarioId: req.user!.id,
+      usuarioNome: req.user!.name,
+      criadoEm: new Date().toISOString()
+    });
+  }
+
+  const purchase: CommercialPurchase = {
+    id: crypto.randomUUID(),
+    companyId,
+    fornecedorId: fornecedorId || '',
+    fornecedorNome,
+    numeroNota: numeroNota ? String(numeroNota).trim() : undefined,
+    dataCompra: dataCompra || new Date().toISOString().slice(0, 10),
+    dataRecebimento: new Date().toISOString(),
+    status: 'recebido',
+    itens: purchaseItems,
+    valorTotal: valorTotal ? parseFloat(valorTotal) : calculatedTotal,
+    formaPagamento: formaPagamento ? String(formaPagamento).trim() : undefined,
+    observacoes: observacoes ? String(observacoes).trim() : undefined,
+    criadoEm: new Date().toISOString()
+  };
+
+  db.commercialPurchases.push(purchase);
+  db.save();
+
+  db.logAudit({
+    userId: req.user!.id,
+    userEmail: req.user!.email,
+    userName: req.user!.name,
+    companyId,
+    acao: 'REGISTRO_COMPRA_ENTRADA_ESTOQUE',
+    detalhes: `Compra de R$ ${purchase.valorTotal.toFixed(2)} recebida de ${fornecedorNome}. Estoque atualizado automaticamente.`,
+    ip: req.ip
+  });
+
+  res.status(201).json({ message: 'Compra registrada e estoque atualizado com sucesso!', purchase });
+});
+
+// --- DASHBOARD & ANALYTICS ---
+
+apiRouter.get('/commerce/dashboard', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const { modulo } = req.query;
+
+  let products = db.commercialProducts.filter(p => p.companyId === companyId && p.ativo);
+  let sales = db.commercialSales.filter(s => s.companyId === companyId && s.status === 'concluida');
+
+  if (modulo && (modulo === 'adega' || modulo === 'tabacaria')) {
+    products = products.filter(p => p.modulo === modulo);
+    sales = sales.filter(s => s.modulo === modulo || s.modulo === 'misto');
+  }
+
+  const totalProdutos = products.length;
+  const valorEstoqueCusto = products.reduce((acc, p) => acc + (p.estoqueAtual * p.precoCusto), 0);
+  const produtosEstoqueBaixo = products.filter(p => p.estoqueAtual <= p.estoqueMinimo);
+
+  // Sales Today
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const salesToday = sales.filter(s => s.criadoEm.startsWith(todayStr));
+  const vendasHojeValor = salesToday.reduce((acc, s) => acc + s.valorTotal, 0);
+  const vendasHojeQtd = salesToday.length;
+
+  // Sales This Month
+  const thisMonthStr = new Date().toISOString().slice(0, 7);
+  const salesMonth = sales.filter(s => s.criadoEm.startsWith(thisMonthStr));
+  const vendasMesValor = salesMonth.reduce((acc, s) => acc + s.valorTotal, 0);
+  const vendasMesQtd = salesMonth.length;
+  const lucroBrutoMesEstimado = salesMonth.reduce((acc, s) => acc + (s.lucroBrutoEstimado || 0), 0);
+
+  // Top selling products
+  const productSalesMap: Record<string, { nome: string; quantidade: number; valor: number }> = {};
+  sales.forEach(sale => {
+    sale.itens.forEach(item => {
+      if (!productSalesMap[item.productId]) {
+        productSalesMap[item.productId] = { nome: item.nome, quantidade: 0, valor: 0 };
+      }
+      productSalesMap[item.productId].quantidade += item.quantidade;
+      productSalesMap[item.productId].valor += item.total;
+    });
+  });
+
+  const topProdutosMaisVendidos = Object.entries(productSalesMap)
+    .map(([productId, val]) => ({
+      productId,
+      nome: val.nome,
+      quantidadeTotal: val.quantidade,
+      valorTotal: val.valor
+    }))
+    .sort((a, b) => b.quantidadeTotal - a.quantidadeTotal)
+    .slice(0, 8);
+
+  // Stagnant products (items with 0 sales in the database)
+  const produtosParados = products
+    .filter(p => !productSalesMap[p.id] || productSalesMap[p.id].quantidade === 0)
+    .slice(0, 10);
+
+  // Comparison between Adega and Tabacaria
+  const allCompProducts = db.commercialProducts.filter(p => p.companyId === companyId && p.ativo);
+  const allCompSales = db.commercialSales.filter(s => s.companyId === companyId && s.status === 'concluida' && s.criadoEm.startsWith(thisMonthStr));
+
+  const adegaProds = allCompProducts.filter(p => p.modulo === 'adega');
+  const tabaProds = allCompProducts.filter(p => p.modulo === 'tabacaria');
+
+  const adegaSalesVal = allCompSales.filter(s => s.modulo === 'adega').reduce((acc, s) => acc + s.valorTotal, 0);
+  const tabaSalesVal = allCompSales.filter(s => s.modulo === 'tabacaria').reduce((acc, s) => acc + s.valorTotal, 0);
+
+  const comparativoModulos = {
+    adega: {
+      totalProdutos: adegaProds.length,
+      totalEstoqueValor: adegaProds.reduce((acc, p) => acc + (p.estoqueAtual * p.precoCusto), 0),
+      vendasMesValor: adegaSalesVal
+    },
+    tabacaria: {
+      totalProdutos: tabaProds.length,
+      totalEstoqueValor: tabaProds.reduce((acc, p) => acc + (p.estoqueAtual * p.precoCusto), 0),
+      vendasMesValor: tabaSalesVal
+    }
+  };
+
+  res.json({
+    totalProdutos,
+    valorEstoqueCusto,
+    produtosEstoqueBaixoCount: produtosEstoqueBaixo.length,
+    vendasHojeValor,
+    vendasHojeQtd,
+    vendasMesValor,
+    vendasMesQtd,
+    lucroBrutoMesEstimado,
+    topProdutosMaisVendidos,
+    produtosEstoqueBaixo: produtosEstoqueBaixo.slice(0, 10),
+    produtosParados,
+    comparativoModulos
+  });
+});
+
 
 

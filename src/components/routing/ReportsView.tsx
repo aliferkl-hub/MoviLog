@@ -16,7 +16,8 @@ import {
   Filter,
   Loader2,
   RefreshCw,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Printer
 } from 'lucide-react';
 
 export const ReportsView: React.FC = () => {
@@ -104,14 +105,22 @@ export const ReportsView: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          <button
+            onClick={() => window.print()}
+            className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 hover:text-white text-xs font-bold transition flex items-center gap-2"
+          >
+            <Printer className="w-4 h-4 text-violet-400" />
+            <span className="hidden sm:inline">Imprimir Resumo</span>
+          </button>
+
           <button
             onClick={exportExcel}
             disabled={deliveries.length === 0}
             className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white text-xs font-bold transition flex items-center gap-2 shadow-lg shadow-emerald-600/20"
           >
             <Download className="w-4 h-4" />
-            <span>Exportar Planilha Excel (.xlsx)</span>
+            <span>Exportar XLSX</span>
           </button>
 
           <button

@@ -498,13 +498,171 @@ export interface FinancialRecord {
 export interface NotificationItem {
   id: string;
   companyId?: string | null;
-  tipo: 'entrega' | 'fiscal' | 'frota' | 'portaria' | 'sistema';
+  tipo: 'entrega' | 'fiscal' | 'frota' | 'portaria' | 'sistema' | 'comercio';
   titulo: string;
   mensagem: string;
   lida: boolean;
   prioridade: 'baixa' | 'media' | 'alta' | 'urgente';
   link?: string;
   dataHora: string;
+}
+
+// ==========================================
+// Adega & Tabacaria Commercial Models
+// ==========================================
+
+export interface CommercialProduct {
+  id: string;
+  companyId: string;
+  modulo: 'adega' | 'tabacaria';
+  sku: string;
+  codigoBarras?: string;
+  nome: string;
+  categoria: string;
+  descricao?: string;
+  marca?: string;
+  fornecedorId?: string;
+  fornecedorNome?: string;
+  precoCusto: number;
+  precoVenda: number;
+  estoqueAtual: number;
+  estoqueMinimo: number;
+  unidade: string;
+  fotoUrl?: string;
+  idadeMinima: number;
+  ativo: boolean;
+  criadoEm: string;
+  atualizadoEm: string;
+}
+
+export interface CommercialStockMovement {
+  id: string;
+  companyId: string;
+  productId: string;
+  productNome: string;
+  modulo: 'adega' | 'tabacaria';
+  tipo: 'entrada_compra' | 'saida_venda' | 'ajuste_manual' | 'perda_avaria' | 'vencimento' | 'devolucao';
+  quantidade: number;
+  quantidadeAnterior: number;
+  quantidadeNova: number;
+  motivo: string;
+  usuarioId: string;
+  usuarioNome: string;
+  referenciaId?: string;
+  criadoEm: string;
+}
+
+export interface CommercialSaleItem {
+  productId: string;
+  sku: string;
+  nome: string;
+  categoria: string;
+  quantidade: number;
+  precoUnitario: number;
+  precoCusto: number;
+  subtotal: number;
+  desconto: number;
+  total: number;
+}
+
+export interface CommercialSale {
+  id: string;
+  codigoVenda: string;
+  companyId: string;
+  modulo: 'adega' | 'tabacaria' | 'misto';
+  itens: CommercialSaleItem[];
+  subtotal: number;
+  descontoTotal: number;
+  valorTotal: number;
+  custoTotalEstimado: number;
+  lucroBrutoEstimado: number;
+  formaPagamento: 'dinheiro' | 'pix' | 'cartao_credito' | 'cartao_debito' | 'misto';
+  valorPago?: number;
+  troco?: number;
+  caixaSessionId?: string;
+  status: 'concluida' | 'cancelada';
+  motivoCancelamento?: string;
+  clienteNome?: string;
+  clienteDocumento?: string;
+  verificacaoMaioridade: boolean;
+  operadorId: string;
+  operadorNome: string;
+  criadoEm: string;
+  canceladoEm?: string;
+  canceladoPor?: string;
+}
+
+export interface CashMovement {
+  id: string;
+  tipo: 'suprimento' | 'sangria';
+  valor: number;
+  motivo: string;
+  autorizadoPor: string;
+  dataHora: string;
+}
+
+export interface CommercialCashSession {
+  id: string;
+  codigoSessao: string;
+  companyId: string;
+  modulo: 'adega' | 'tabacaria' | 'geral';
+  operadorId: string;
+  operadorNome: string;
+  status: 'aberto' | 'fechado';
+  abertoEm: string;
+  fechadoEm?: string;
+  saldoInicial: number;
+  suprimentos: number;
+  sangrias: number;
+  totalVendasDinheiro: number;
+  totalVendasPix: number;
+  totalVendasCartao: number;
+  totalVendasOutros: number;
+  saldoEsperadoDinheiro: number;
+  saldoContadoDinheiro?: number;
+  diferenca?: number;
+  observacoesFechamento?: string;
+  movimentacoesManuais: CashMovement[];
+}
+
+export interface CommercialSupplier {
+  id: string;
+  companyId: string;
+  razaoSocial: string;
+  nomeFantasia: string;
+  cnpjCpf: string;
+  contatoNome: string;
+  telefone: string;
+  email: string;
+  endereco?: string;
+  segmento: 'adega' | 'tabacaria' | 'ambos';
+  observacoes?: string;
+  ativo: boolean;
+  criadoEm: string;
+}
+
+export interface CommercialPurchaseItem {
+  productId: string;
+  nome: string;
+  quantidade: number;
+  custoUnitario: number;
+  total: number;
+}
+
+export interface CommercialPurchase {
+  id: string;
+  companyId: string;
+  fornecedorId: string;
+  fornecedorNome: string;
+  numeroNota?: string;
+  dataCompra: string;
+  dataRecebimento?: string;
+  status: 'pendente' | 'recebido' | 'cancelado';
+  itens: CommercialPurchaseItem[];
+  valorTotal: number;
+  formaPagamento?: string;
+  observacoes?: string;
+  criadoEm: string;
 }
 
 export interface DatabaseSchema {
@@ -528,6 +686,13 @@ export interface DatabaseSchema {
   fiscalDocuments: FiscalDocument[];
   financialRecords: FinancialRecord[];
   notifications: NotificationItem[];
+  // Adega & Tabacaria Commercial Collections
+  commercialProducts: CommercialProduct[];
+  commercialStockMovements: CommercialStockMovement[];
+  commercialSales: CommercialSale[];
+  commercialCashSessions: CommercialCashSession[];
+  commercialSuppliers: CommercialSupplier[];
+  commercialPurchases: CommercialPurchase[];
 }
 
 // Default Seed Data
@@ -701,7 +866,13 @@ class Database {
           fiscalConfigs: parsed.fiscalConfigs || [],
           fiscalDocuments: parsed.fiscalDocuments || [],
           financialRecords: parsed.financialRecords || [],
-          notifications: parsed.notifications || []
+          notifications: parsed.notifications || [],
+          commercialProducts: parsed.commercialProducts || [],
+          commercialStockMovements: parsed.commercialStockMovements || [],
+          commercialSales: parsed.commercialSales || [],
+          commercialCashSessions: parsed.commercialCashSessions || [],
+          commercialSuppliers: parsed.commercialSuppliers || [],
+          commercialPurchases: parsed.commercialPurchases || []
         };
       } catch (err) {
         console.error('Error loading db.json, attempting backup_db.json fallback:', err);
@@ -731,7 +902,13 @@ class Database {
               fiscalConfigs: parsedBackup.fiscalConfigs || [],
               fiscalDocuments: parsedBackup.fiscalDocuments || [],
               financialRecords: parsedBackup.financialRecords || [],
-              notifications: parsedBackup.notifications || []
+              notifications: parsedBackup.notifications || [],
+              commercialProducts: parsedBackup.commercialProducts || [],
+              commercialStockMovements: parsedBackup.commercialStockMovements || [],
+              commercialSales: parsedBackup.commercialSales || [],
+              commercialCashSessions: parsedBackup.commercialCashSessions || [],
+              commercialSuppliers: parsedBackup.commercialSuppliers || [],
+              commercialPurchases: parsedBackup.commercialPurchases || []
             };
           } catch (backupErr) {
             console.error('Falha ao carregar backup_db.json:', backupErr);
@@ -760,7 +937,13 @@ class Database {
       fiscalConfigs: [],
       fiscalDocuments: [],
       financialRecords: [],
-      notifications: []
+      notifications: [],
+      commercialProducts: [],
+      commercialStockMovements: [],
+      commercialSales: [],
+      commercialCashSessions: [],
+      commercialSuppliers: [],
+      commercialPurchases: []
     };
     this.saveData(initial);
     return initial;
@@ -804,6 +987,12 @@ class Database {
   public get fiscalDocuments() { return this.data.fiscalDocuments; }
   public get financialRecords() { return this.data.financialRecords; }
   public get notifications() { return this.data.notifications; }
+  public get commercialProducts() { return this.data.commercialProducts; }
+  public get commercialStockMovements() { return this.data.commercialStockMovements; }
+  public get commercialSales() { return this.data.commercialSales; }
+  public get commercialCashSessions() { return this.data.commercialCashSessions; }
+  public get commercialSuppliers() { return this.data.commercialSuppliers; }
+  public get commercialPurchases() { return this.data.commercialPurchases; }
 
   public logAudit(log: Omit<AuditLog, 'id' | 'timestamp'>): void {
     const entry: AuditLog = {

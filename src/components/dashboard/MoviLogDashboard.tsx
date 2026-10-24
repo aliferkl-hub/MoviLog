@@ -44,7 +44,7 @@ import {
 
 interface MoviLogDashboardProps {
   onNavigate: (module: string, view?: string) => void;
-  onOpenPublicTrack: () => void;
+  onOpenPublicTrack?: () => void;
 }
 
 export const MoviLogDashboard: React.FC<MoviLogDashboardProps> = ({

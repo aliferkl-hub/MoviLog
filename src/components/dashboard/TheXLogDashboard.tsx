@@ -27,12 +27,15 @@ import {
   FileText
 } from 'lucide-react';
 
+import { MoviLogDashboard } from './MoviLogDashboard';
+
 interface TheXLogDashboardProps {
   onNavigate: (module: string, view?: string) => void;
 }
 
 export const TheXLogDashboard: React.FC<TheXLogDashboardProps> = ({ onNavigate }) => {
   const { user, company, isMaster } = useAuth();
+  const [dashboardViewMode, setDashboardViewMode] = useState<'panoramica' | 'torre'>('panoramica');
   const [deliveries, setDeliveries] = useState<DeliveryItem[]>([]);
   const [routes, setRoutes] = useState<DeliveryRoute[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -106,8 +109,46 @@ export const TheXLogDashboard: React.FC<TheXLogDashboardProps> = ({ onNavigate }
 
   return (
     <div className="space-y-6">
-      {/* Top Welcome & KPI Header Banner */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-[#0d0f18] via-[#121124] to-[#0d0f18] border border-violet-500/20 p-6 shadow-2xl">
+      {/* Switcher: Visão Panorâmica 360° vs Torre de Roteirização */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#2D2644] pb-4">
+        <div className="flex items-center gap-2 bg-[#0D0B18] p-1.5 rounded-2xl border border-[#2D2644]">
+          <button
+            onClick={() => setDashboardViewMode('panoramica')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+              dashboardViewMode === 'panoramica'
+                ? 'bg-gradient-to-r from-[#8B5CF6] to-[#7C3AED] text-white shadow-lg shadow-[#8B5CF6]/30'
+                : 'text-[#AAA6B5] hover:text-white'
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5 text-white" />
+            <span>Visão Panorâmica 360° (MoviLog)</span>
+          </button>
+
+          <button
+            onClick={() => setDashboardViewMode('torre')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+              dashboardViewMode === 'torre'
+                ? 'bg-gradient-to-r from-[#8B5CF6] to-[#7C3AED] text-white shadow-lg shadow-[#8B5CF6]/30'
+                : 'text-[#AAA6B5] hover:text-white'
+            }`}
+          >
+            <Navigation className="w-3.5 h-3.5 text-white" />
+            <span>Torre de Roteirização & Entregas</span>
+          </button>
+        </div>
+
+        <div className="text-[11px] text-[#AAA6B5] flex items-center gap-2 font-mono">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          <span>{dashboardViewMode === 'panoramica' ? 'Módulos Integrados Ativos' : 'Torre de Controle Operacional'}</span>
+        </div>
+      </div>
+
+      {dashboardViewMode === 'panoramica' ? (
+        <MoviLogDashboard onNavigate={onNavigate} />
+      ) : (
+        <>
+          {/* Top Welcome & KPI Header Banner */}
+          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-[#0d0f18] via-[#121124] to-[#0d0f18] border border-violet-500/20 p-6 shadow-2xl">
         <div className="absolute top-0 right-0 w-96 h-96 bg-violet-600/10 rounded-full blur-3xl pointer-events-none" />
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div>
@@ -622,6 +663,8 @@ export const TheXLogDashboard: React.FC<TheXLogDashboardProps> = ({ onNavigate }
           </div>
         )}
       </div>
+        </>
+      )}
     </div>
   );
 };

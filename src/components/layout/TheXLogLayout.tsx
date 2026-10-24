@@ -92,9 +92,15 @@ export const TheXLogLayout: React.FC<TheXLogLayoutProps> = ({
   const getPageTitle = () => {
     if (currentModule === 'dashboard') return 'Painel MoviLog — Visão Geral & Indicadores';
     if (currentModule === 'driver') return 'Painel do Entregador (App Mobile & GPS)';
-    if (currentModule === 'master') return 'Painel Master Owner — Gestão Global & Licenças';
+    if (currentModule === 'master') {
+      if (activeView === 'users') return 'Gestão de Equipe & Colaboradores';
+      if (activeView === 'settings') return 'Configurações Operacionais da Empresa';
+      return isMaster ? 'Painel Master Owner — Gestão Global & Licenças' : 'Configurações da Empresa';
+    }
     if (currentModule === 'fiscal') return 'Central Fiscal — Emissão de NF-e, CT-e e MDF-e';
     if (currentModule === 'financial') return 'Gestão Financeira & Custos Operacionais';
+    if (currentModule === 'adega') return 'Módulo Adega & Bebidas — Frente de Caixa, Estoque & Vendas';
+    if (currentModule === 'tabacaria') return 'Módulo Tabacaria & Headshop — PDV, Produtos & Estoque';
 
     if (currentModule === 'logistica') {
       switch (activeView) {

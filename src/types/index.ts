@@ -533,11 +533,192 @@ export interface FinancialRecord {
 export interface NotificationItem {
   id: string;
   companyId?: string | null;
-  tipo: 'entrega' | 'fiscal' | 'frota' | 'portaria' | 'sistema';
+  tipo: 'entrega' | 'fiscal' | 'frota' | 'portaria' | 'sistema' | 'comercio';
   titulo: string;
   mensagem: string;
   lida: boolean;
   prioridade: 'baixa' | 'media' | 'alta' | 'urgente';
   link?: string;
   dataHora: string;
+}
+
+// ==========================================
+// Adega & Tabacaria Commercial Models
+// ==========================================
+
+export interface CommercialProduct {
+  id: string;
+  companyId: string;
+  modulo: 'adega' | 'tabacaria';
+  sku: string;
+  codigoBarras?: string;
+  nome: string;
+  categoria: string;
+  descricao?: string;
+  marca?: string;
+  fornecedorId?: string;
+  fornecedorNome?: string;
+  precoCusto: number;
+  precoVenda: number;
+  estoqueAtual: number;
+  estoqueMinimo: number;
+  unidade: string;
+  fotoUrl?: string;
+  idadeMinima: number;
+  ativo: boolean;
+  criadoEm: string;
+  atualizadoEm: string;
+}
+
+export interface CommercialStockMovement {
+  id: string;
+  companyId: string;
+  productId: string;
+  productNome: string;
+  modulo: 'adega' | 'tabacaria';
+  tipo: 'entrada_compra' | 'saida_venda' | 'ajuste_manual' | 'perda_avaria' | 'vencimento' | 'devolucao';
+  quantidade: number;
+  quantidadeAnterior: number;
+  quantidadeNova: number;
+  motivo: string;
+  usuarioId: string;
+  usuarioNome: string;
+  referenciaId?: string;
+  criadoEm: string;
+}
+
+export interface CommercialSaleItem {
+  productId: string;
+  sku: string;
+  nome: string;
+  categoria: string;
+  quantidade: number;
+  precoUnitario: number;
+  precoCusto: number;
+  subtotal: number;
+  desconto: number;
+  total: number;
+}
+
+export interface CommercialSale {
+  id: string;
+  codigoVenda: string;
+  companyId: string;
+  modulo: 'adega' | 'tabacaria' | 'misto';
+  itens: CommercialSaleItem[];
+  subtotal: number;
+  descontoTotal: number;
+  valorTotal: number;
+  custoTotalEstimado: number;
+  lucroBrutoEstimado: number;
+  formaPagamento: 'dinheiro' | 'pix' | 'cartao_credito' | 'cartao_debito' | 'misto';
+  valorPago?: number;
+  troco?: number;
+  caixaSessionId?: string;
+  status: 'concluida' | 'cancelada';
+  motivoCancelamento?: string;
+  clienteNome?: string;
+  clienteDocumento?: string;
+  verificacaoMaioridade: boolean;
+  operadorId: string;
+  operadorNome: string;
+  criadoEm: string;
+  canceladoEm?: string;
+  canceladoPor?: string;
+}
+
+export interface CashMovement {
+  id: string;
+  tipo: 'suprimento' | 'sangria';
+  valor: number;
+  motivo: string;
+  autorizadoPor: string;
+  dataHora: string;
+}
+
+export interface CommercialCashSession {
+  id: string;
+  codigoSessao: string;
+  companyId: string;
+  modulo: 'adega' | 'tabacaria' | 'geral';
+  operadorId: string;
+  operadorNome: string;
+  status: 'aberto' | 'fechado';
+  abertoEm: string;
+  fechadoEm?: string;
+  saldoInicial: number;
+  suprimentos: number;
+  sangrias: number;
+  totalVendasDinheiro: number;
+  totalVendasPix: number;
+  totalVendasCartao: number;
+  totalVendasOutros: number;
+  saldoEsperadoDinheiro: number;
+  saldoContadoDinheiro?: number;
+  diferenca?: number;
+  observacoesFechamento?: string;
+  movimentacoesManuais: CashMovement[];
+}
+
+export interface CommercialSupplier {
+  id: string;
+  companyId: string;
+  razaoSocial: string;
+  nomeFantasia: string;
+  cnpjCpf: string;
+  contatoNome: string;
+  telefone: string;
+  email: string;
+  endereco?: string;
+  segmento: 'adega' | 'tabacaria' | 'ambos';
+  observacoes?: string;
+  ativo: boolean;
+  criadoEm: string;
+}
+
+export interface CommercialPurchaseItem {
+  productId: string;
+  nome: string;
+  quantidade: number;
+  custoUnitario: number;
+  total: number;
+}
+
+export interface CommercialPurchase {
+  id: string;
+  companyId: string;
+  fornecedorId: string;
+  fornecedorNome: string;
+  numeroNota?: string;
+  dataCompra: string;
+  dataRecebimento?: string;
+  status: 'pendente' | 'recebido' | 'cancelado';
+  itens: CommercialPurchaseItem[];
+  valorTotal: number;
+  formaPagamento?: string;
+  observacoes?: string;
+  criadoEm: string;
+}
+
+export interface CommercialDashboardMetrics {
+  totalProdutos: number;
+  valorEstoqueCusto: number;
+  produtosEstoqueBaixoCount: number;
+  vendasHojeValor: number;
+  vendasHojeQtd: number;
+  vendasMesValor: number;
+  vendasMesQtd: number;
+  lucroBrutoMesEstimado: number;
+  topProdutosMaisVendidos: {
+    productId: string;
+    nome: string;
+    quantidadeTotal: number;
+    valorTotal: number;
+  }[];
+  produtosEstoqueBaixo: CommercialProduct[];
+  produtosParados: CommercialProduct[];
+  comparativoModulos: {
+    adega: { totalProdutos: number; totalEstoqueValor: number; vendasMesValor: number };
+    tabacaria: { totalProdutos: number; totalEstoqueValor: number; vendasMesValor: number };
+  };
 }
