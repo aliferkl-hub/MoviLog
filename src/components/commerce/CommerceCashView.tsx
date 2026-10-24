@@ -41,6 +41,7 @@ export const CommerceCashView: React.FC<CommerceCashViewProps> = ({ modulo }) =>
   const [movementType, setMovementType] = useState<'suprimento' | 'sangria'>('sangria');
 
   // Forms
+  const [selectedModuloAbertura, setSelectedModuloAbertura] = useState<'adega' | 'tabacaria'>(modulo);
   const [saldoInicialInput, setSaldoInicialInput] = useState('100.00');
   const [saldoContadoInput, setSaldoContadoInput] = useState('');
   const [observacoesFechamento, setObservacoesFechamento] = useState('');
@@ -54,7 +55,7 @@ export const CommerceCashView: React.FC<CommerceCashViewProps> = ({ modulo }) =>
       setErrorMsg(null);
       const [currentRes, historyRes] = await Promise.all([
         api.getCurrentCashSession(modulo),
-        api.getCashHistory()
+        api.getCashHistory(modulo)
       ]);
       setCurrentSession(currentRes.session || null);
       // Filter past sessions matching module or geral
@@ -70,6 +71,7 @@ export const CommerceCashView: React.FC<CommerceCashViewProps> = ({ modulo }) =>
   };
 
   useEffect(() => {
+    setSelectedModuloAbertura(modulo);
     loadData();
   }, [modulo]);
 
@@ -80,11 +82,15 @@ export const CommerceCashView: React.FC<CommerceCashViewProps> = ({ modulo }) =>
       setSubmitting(true);
       setErrorMsg(null);
       const saldo = Math.max(0, parseFloat(saldoInicialInput) || 0);
-      const res = await api.openCashSession({ saldoInicial: saldo, modulo });
-      if (res.success) {
-        setSuccessMsg(`Caixa aberto com sucesso com saldo inicial de R$ ${saldo.toFixed(2)}.`);
+      const res = await api.openCashSession({ saldoInicial: saldo, modulo: selectedModuloAbertura });
+      if (res.success || (res as any).session) {
+        setSuccessMsg(
+          `Caixa da ${selectedModuloAbertura === 'adega' ? 'Adega' : 'Tabacaria'} aberto com sucesso (Saldo inicial: R$ ${saldo.toFixed(2)}).`
+        );
         setIsOpenCashModal(false);
         loadData();
+      } else {
+        setErrorMsg((res as any).message || 'Não foi possível abrir o caixa.');
       }
     } catch (err: any) {
       setErrorMsg(err.message || 'Erro ao abrir caixa.');
@@ -144,8 +150,8 @@ export const CommerceCashView: React.FC<CommerceCashViewProps> = ({ modulo }) =>
         saldoContadoDinheiro: saldoContado,
         observacoes: observacoesFechamento.trim() || undefined
       });
-      if (res.success) {
-        const diff = res.diferenca;
+      if (res.success || (res as any).session) {
+        const diff = res.diferenca !== undefined ? res.diferenca : ((res as any).session?.diferenca ?? 0);
         const diffText =
           diff === 0
             ? 'Caixa conciliado perfeitamente (diferença zero).'
@@ -158,6 +164,8 @@ export const CommerceCashView: React.FC<CommerceCashViewProps> = ({ modulo }) =>
         setSaldoContadoInput('');
         setObservacoesFechamento('');
         loadData();
+      } else {
+        setErrorMsg((res as any).message || 'Erro ao fechar caixa.');
       }
     } catch (err: any) {
       setErrorMsg(err.message || 'Erro ao fechar caixa.');
@@ -483,16 +491,56 @@ export const CommerceCashView: React.FC<CommerceCashViewProps> = ({ modulo }) =>
 
             <h3 className="text-base font-bold text-white mb-2 flex items-center gap-2">
               <Unlock className="w-5 h-5 text-emerald-400" />
-              Abertura de Caixa
+              Abertura de Caixa — Sessão Comercial
             </h3>
             <p className="text-xs text-[#AAA6B5] mb-4">
-              Informe o valor de troco inicial colocado na gaveta do caixa.
+              Selecione o módulo de operação e informe o valor de troco inicial colocado na gaveta física.
             </p>
 
             <form onSubmit={handleOpenCash} className="space-y-4">
+              {/* Module Selector */}
+              <div>
+                <label className="text-xs font-semibold text-[#AAA6B5] mb-1.5 block">
+                  Ponto de Venda / Módulo *
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedModuloAbertura('adega')}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                      selectedModuloAbertura === 'adega'
+                        ? 'bg-[#8B5CF6]/20 border-[#8B5CF6] text-white shadow-lg shadow-[#8B5CF6]/20'
+                        : 'bg-[#0A0714] border-[#262042] text-[#AAA6B5] hover:text-white'
+                    }`}
+                  >
+                    <span>🍷 Caixa Adega</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedModuloAbertura('tabacaria')}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                      selectedModuloAbertura === 'tabacaria'
+                        ? 'bg-[#8B5CF6]/20 border-[#8B5CF6] text-white shadow-lg shadow-[#8B5CF6]/20'
+                        : 'bg-[#0A0714] border-[#262042] text-[#AAA6B5] hover:text-white'
+                    }`}
+                  >
+                    <span>💨 Caixa Tabacaria</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Operator info badge */}
+              <div className="p-2.5 rounded-xl bg-[#0A0714] border border-[#262042] text-xs flex items-center justify-between text-[#AAA6B5]">
+                <span>Operador Responsável:</span>
+                <span className="font-bold text-white flex items-center gap-1">
+                  <User className="w-3.5 h-3.5 text-[#8B5CF6]" />
+                  {user?.name || (user as any)?.nome || 'Operador'}
+                </span>
+              </div>
+
               <div>
                 <label className="text-xs font-semibold text-[#AAA6B5] mb-1 block">
-                  Saldo Inicial / Fundo de Troco (R$) *
+                  Saldo Inicial / Fundo de Troco em Dinheiro (R$) *
                 </label>
                 <input
                   type="number"
@@ -503,6 +551,9 @@ export const CommerceCashView: React.FC<CommerceCashViewProps> = ({ modulo }) =>
                   onChange={e => setSaldoInicialInput(e.target.value)}
                   className="w-full bg-[#0A0714] border border-[#262042] rounded-xl px-3 py-2 text-base font-bold text-emerald-400 focus:outline-none focus:border-[#8B5CF6]"
                 />
+                <span className="text-[11px] text-[#716A86] block mt-1">
+                  Cédulas e moedas físicas disponíveis na gaveta para iniciar a operação.
+                </span>
               </div>
 
               <div className="flex justify-end gap-3 pt-3 border-t border-[#262042]">
@@ -614,7 +665,7 @@ export const CommerceCashView: React.FC<CommerceCashViewProps> = ({ modulo }) =>
       {/* Modal: Close Cash Register */}
       {isCloseCashModal && currentSession && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#121024] border border-[#262042] rounded-3xl p-6 max-w-md w-full shadow-2xl relative text-white">
+          <div className="bg-[#121024] border border-[#262042] rounded-3xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl relative text-white">
             <button
               onClick={() => setIsCloseCashModal(false)}
               className="absolute top-4 right-4 text-[#AAA6B5] hover:text-white p-1"
@@ -622,51 +673,83 @@ export const CommerceCashView: React.FC<CommerceCashViewProps> = ({ modulo }) =>
               <X className="w-5 h-5" />
             </button>
 
-            <h3 className="text-base font-bold text-white mb-2 flex items-center gap-2">
+            <h3 className="text-base font-bold text-white mb-1 flex items-center gap-2">
               <Lock className="w-5 h-5 text-rose-400" />
-              Fechamento & Conciliação de Caixa
+              Fechamento & Conferência Cega de Caixa
             </h3>
             <p className="text-xs text-[#AAA6B5] mb-4">
-              Realize a contagem física do dinheiro em espécie presente na gaveta e confirme os valores.
+              Módulo: <strong className="text-white uppercase">{currentSession.modulo}</strong> — Sessão: <span className="font-mono text-[#C4B5FD]">{currentSession.codigoSessao}</span>
             </p>
 
             <form onSubmit={handleCloseCash} className="space-y-4">
-              <div className="bg-[#0A0714] border border-[#262042] rounded-xl p-3 text-xs space-y-1.5">
+              {/* Resumo da Gaveta de Dinheiro Físico */}
+              <div className="bg-[#0A0714] border border-[#262042] rounded-2xl p-3.5 text-xs space-y-2">
+                <div className="font-bold text-white pb-1 border-b border-[#262042] flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 text-emerald-400">
+                    <DollarSign className="w-4 h-4" />
+                    Composição da Gaveta Física (Dinheiro em Espécie)
+                  </span>
+                </div>
                 <div className="flex justify-between text-[#AAA6B5]">
-                  <span>Saldo Inicial:</span>
-                  <span>R$ {currentSession.saldoInicial.toFixed(2)}</span>
+                  <span>Fundo de Troco Inicial:</span>
+                  <span className="font-mono">R$ {currentSession.saldoInicial.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-emerald-400">
-                  <span>Vendas em Dinheiro:</span>
-                  <span>+ R$ {currentSession.totalVendasDinheiro.toFixed(2)}</span>
+                  <span>(+) Vendas Recebidas em Dinheiro:</span>
+                  <span className="font-mono">+ R$ {currentSession.totalVendasDinheiro.toFixed(2)}</span>
                 </div>
                 {currentSession.suprimentos > 0 && (
                   <div className="flex justify-between text-cyan-400">
-                    <span>Suprimentos Adicionados:</span>
-                    <span>+ R$ {currentSession.suprimentos.toFixed(2)}</span>
+                    <span>(+) Suprimentos Adicionados:</span>
+                    <span className="font-mono">+ R$ {currentSession.suprimentos.toFixed(2)}</span>
                   </div>
                 )}
                 {currentSession.sangrias > 0 && (
                   <div className="flex justify-between text-rose-400">
-                    <span>Sangrias Efetuadas:</span>
-                    <span>- R$ {currentSession.sangrias.toFixed(2)}</span>
+                    <span>(-) Sangrias Efetuadas:</span>
+                    <span className="font-mono">- R$ {currentSession.sangrias.toFixed(2)}</span>
                   </div>
                 )}
-                <div className="flex justify-between font-bold text-white pt-1 border-t border-[#262042]">
-                  <span>Saldo Esperado em Espécie:</span>
-                  <span>R$ {currentSession.saldoEsperadoDinheiro.toFixed(2)}</span>
+                <div className="flex justify-between font-bold text-white pt-2 border-t border-[#262042] text-sm">
+                  <span>Saldo Esperado na Gaveta Física:</span>
+                  <span className="font-mono text-emerald-300">R$ {currentSession.saldoEsperadoDinheiro.toFixed(2)}</span>
                 </div>
               </div>
 
+              {/* Informação dos Meios Eletrônicos (Fora da gaveta) */}
+              <div className="bg-[#0A0714]/60 border border-blue-500/20 rounded-2xl p-3 text-xs space-y-1.5">
+                <div className="font-semibold text-blue-300 flex items-center gap-1.5 mb-1">
+                  <Info className="w-3.5 h-3.5" />
+                  Recebimentos Eletrônicos (Não pertencem à gaveta física):
+                </div>
+                <div className="flex justify-between text-[#AAA6B5]">
+                  <span>Vendas via PIX (Conta Bancária):</span>
+                  <span className="font-mono text-cyan-400">R$ {currentSession.totalVendasPix.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-[#AAA6B5]">
+                  <span>Vendas Cartão Débito (Maquininha):</span>
+                  <span className="font-mono text-purple-400">R$ {(currentSession.totalVendasCartaoDebito ?? 0).toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-[#AAA6B5]">
+                  <span>Vendas Cartão Crédito (Maquininha):</span>
+                  <span className="font-mono text-purple-400">R$ {(currentSession.totalVendasCartaoCredito ?? 0).toFixed(2)}</span>
+                </div>
+                <p className="text-[10px] text-[#716A86] pt-1 border-t border-[#262042]/50 italic">
+                  * Valores via PIX e Cartão caem direto na adquirente/banco e NÃO devem ser contados na contagem física da gaveta.
+                </p>
+              </div>
+
+              {/* Input de Contagem Física */}
               <div>
                 <label className="text-xs font-semibold text-[#AAA6B5] mb-1 block">
-                  Saldo Físico Contado na Gaveta (R$) *
+                  Valor Físico Contado na Gaveta (Cédulas e Moedas) *
                 </label>
                 <input
                   type="number"
                   step="0.01"
                   min="0"
                   required
+                  placeholder="0,00"
                   value={saldoContadoInput}
                   onChange={e => setSaldoContadoInput(e.target.value)}
                   className="w-full bg-[#0A0714] border border-[#262042] rounded-xl px-3 py-2 text-base font-bold text-white focus:outline-none focus:border-[#8B5CF6]"
@@ -675,33 +758,35 @@ export const CommerceCashView: React.FC<CommerceCashViewProps> = ({ modulo }) =>
 
               {/* Live difference preview */}
               {saldoContadoInput && (
-                <div className="text-xs flex justify-between items-center px-1">
+                <div className="p-2.5 rounded-xl bg-[#0A0714] border border-[#262042] text-xs flex justify-between items-center">
                   <span className="text-[#AAA6B5]">Diferença Apurada:</span>
                   <span
-                    className={`font-bold ${
-                      parseFloat(saldoContadoInput) - currentSession.saldoEsperadoDinheiro === 0
+                    className={`font-bold font-mono ${
+                      Math.abs(parseFloat(saldoContadoInput) - currentSession.saldoEsperadoDinheiro) < 0.01
                         ? 'text-emerald-400'
                         : parseFloat(saldoContadoInput) - currentSession.saldoEsperadoDinheiro > 0
                         ? 'text-blue-400'
                         : 'text-rose-400'
                     }`}
                   >
-                    {(parseFloat(saldoContadoInput) - currentSession.saldoEsperadoDinheiro) === 0
-                      ? 'R$ 0,00 (Caixa Exato)'
-                      : `R$ ${(parseFloat(saldoContadoInput) - currentSession.saldoEsperadoDinheiro).toFixed(2)}`}
+                    {Math.abs(parseFloat(saldoContadoInput) - currentSession.saldoEsperadoDinheiro) < 0.01
+                      ? 'R$ 0,00 (Caixa Perfeito)'
+                      : parseFloat(saldoContadoInput) - currentSession.saldoEsperadoDinheiro > 0
+                      ? `+ R$ ${(parseFloat(saldoContadoInput) - currentSession.saldoEsperadoDinheiro).toFixed(2)} (SOBRA)`
+                      : `- R$ ${Math.abs(parseFloat(saldoContadoInput) - currentSession.saldoEsperadoDinheiro).toFixed(2)} (FALTA)`}
                   </span>
                 </div>
               )}
 
               <div>
                 <label className="text-xs font-semibold text-[#AAA6B5] mb-1 block">
-                  Observações de Fechamento (opcional)
+                  Observações de Fechamento / Auditoria (opcional)
                 </label>
                 <textarea
                   rows={2}
                   value={observacoesFechamento}
                   onChange={e => setObservacoesFechamento(e.target.value)}
-                  placeholder="Justifique qualquer diferença de valores..."
+                  placeholder="Justifique diferenças ou registre informações para o gestor..."
                   className="w-full bg-[#0A0714] border border-[#262042] rounded-xl px-3 py-2 text-xs text-white placeholder-[#AAA6B5] focus:outline-none focus:border-[#8B5CF6]"
                 />
               </div>
@@ -719,7 +804,7 @@ export const CommerceCashView: React.FC<CommerceCashViewProps> = ({ modulo }) =>
                   disabled={submitting}
                   className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition shadow-lg shadow-rose-900/30"
                 >
-                  {submitting ? 'Encerrando...' : 'Confirmar Fechamento'}
+                  {submitting ? 'Encerrando...' : 'Confirmar Fechamento e Lacrar'}
                 </button>
               </div>
             </form>

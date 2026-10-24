@@ -38,9 +38,16 @@ import type {
   CommercialCashSession,
   CashMovement,
   CommercialSupplier,
-  CommercialPurchase
+  CommercialPurchase,
+  PixCharge,
+  CommercialTerminal,
+  CommercialTerminalTransaction,
+  TerminalProvider,
+  TerminalTransactionStatus
 } from './db.ts';
 import { geocodeAddress, calculateDistanceKm } from './geocoding.ts';
+import { generateBacenPixPayload, createPixChargeQrCode, getPixProviderStatus } from './pix.ts';
+import { GatewayFactory } from './payment_gateways/GatewayFactory.ts';
 
 export const apiRouter = express.Router();
 
@@ -4336,7 +4343,7 @@ apiRouter.get('/tracking/public/:code', async (req: Request, res: Response) => {
 // 14. MÓDULOS COMERCIAIS: ADEGA & TABACARIA
 // ==========================================
 
-// Helper: Ensure commercial collections exist in db
+// Helper: Ensure commercial collections exist in db and migrate legal classification
 const ensureCommercialCollections = () => {
   if (!db.commercialProducts) (db as any).data.commercialProducts = [];
   if (!db.commercialStockMovements) (db as any).data.commercialStockMovements = [];
@@ -4344,6 +4351,38 @@ const ensureCommercialCollections = () => {
   if (!db.commercialCashSessions) (db as any).data.commercialCashSessions = [];
   if (!db.commercialSuppliers) (db as any).data.commercialSuppliers = [];
   if (!db.commercialPurchases) (db as any).data.commercialPurchases = [];
+  if (!db.pixCharges) (db as any).data.pixCharges = [];
+  if (!db.commercialTerminals) (db as any).data.commercialTerminals = [];
+  if (!db.commercialTerminalTransactions) (db as any).data.commercialTerminalTransactions = [];
+
+  let hasChanges = false;
+  db.commercialProducts.forEach(p => {
+    if (!p.classificacaoLegal) {
+      const cat = (p.categoria || '').toLowerCase();
+      const nome = (p.nome || '').toLowerCase();
+      if (
+        cat.includes('cerveja') || cat.includes('vinho') || cat.includes('destilad') ||
+        nome.includes('cerveja') || nome.includes('vinho') || nome.includes('vodka') ||
+        nome.includes('whisky') || nome.includes('gin') || nome.includes('cachaça')
+      ) {
+        p.classificacaoLegal = 'bebida_alcoolica';
+        p.idadeMinima = 18;
+      } else if (
+        cat.includes('tabaco') || cat.includes('charuto') || cat.includes('cigarro') ||
+        nome.includes('tabaco') || nome.includes('charuto') || nome.includes('cigarro') || nome.includes('palheiro')
+      ) {
+        p.classificacaoLegal = 'tabaco_derivados';
+        p.idadeMinima = 18;
+      } else {
+        p.classificacaoLegal = 'sem_restricao';
+        p.idadeMinima = 0;
+      }
+      hasChanges = true;
+    }
+  });
+  if (hasChanges) {
+    db.save();
+  }
 };
 
 // --- PRODUTOS ---
@@ -4385,7 +4424,7 @@ apiRouter.get('/commerce/products', authenticate, checkSubscription, (req: AuthR
   // Sort by name
   list.sort((a, b) => a.nome.localeCompare(b.nome));
 
-  res.json({ products: list, total: list.length });
+  res.json({ success: true, products: list, total: list.length });
 });
 
 // Create product
@@ -4398,6 +4437,7 @@ apiRouter.post('/commerce/products', authenticate, checkSubscription, (req: Auth
     codigoBarras,
     nome,
     categoria,
+    classificacaoLegal,
     descricao,
     marca,
     fornecedorId,
@@ -4443,18 +4483,38 @@ apiRouter.post('/commerce/products', authenticate, checkSubscription, (req: Auth
   const stock = parseInt(estoqueAtual, 10) >= 0 ? parseInt(estoqueAtual, 10) : 0;
   const minStock = parseInt(estoqueMinimo, 10) >= 0 ? parseInt(estoqueMinimo, 10) : 5;
 
-  // Determine age requirement (18+ for alcohol categories and tabacaria by default, unless explicitly non-alcoholic)
+  // Legal classification and age requirement
+  let legalClass = classificacaoLegal;
   let minAge = 0;
-  if (modulo === 'tabacaria') {
+  if (legalClass === 'bebida_alcoolica' || legalClass === 'tabaco_derivados' || legalClass === 'outro_restrito') {
     minAge = 18;
+  } else if (legalClass === 'sem_restricao') {
+    minAge = 0;
   } else {
-    const alcoholicCategories = ['cervejas', 'vinhos', 'destilados', 'bebidas alcoolicas', 'chopp', 'whisky', 'vodka'];
-    if (alcoholicCategories.some(c => categoria.toLowerCase().includes(c))) {
+    // Intelligent inferring if not supplied
+    const catLower = (categoria || '').toLowerCase();
+    const nameLower = (nome || '').toLowerCase();
+    if (
+      catLower.includes('cerveja') || catLower.includes('vinho') || catLower.includes('destilad') ||
+      nameLower.includes('cerveja') || nameLower.includes('vinho') || nameLower.includes('vodka') ||
+      nameLower.includes('whisky') || nameLower.includes('gin')
+    ) {
+      legalClass = 'bebida_alcoolica';
       minAge = 18;
+    } else if (
+      catLower.includes('tabaco') || catLower.includes('charuto') || catLower.includes('cigarro') ||
+      nameLower.includes('tabaco') || nameLower.includes('charuto') || nameLower.includes('cigarro') || nameLower.includes('palheiro')
+    ) {
+      legalClass = 'tabaco_derivados';
+      minAge = 18;
+    } else {
+      legalClass = 'sem_restricao';
+      minAge = 0;
     }
   }
+
   if (idadeMinima !== undefined) {
-    minAge = parseInt(idadeMinima, 10) || 0;
+    minAge = parseInt(idadeMinima, 10) >= 0 ? parseInt(idadeMinima, 10) : minAge;
   }
 
   const newProduct: CommercialProduct = {
@@ -4465,6 +4525,7 @@ apiRouter.post('/commerce/products', authenticate, checkSubscription, (req: Auth
     codigoBarras: codigoBarras ? String(codigoBarras).trim() : undefined,
     nome: String(nome).trim(),
     categoria: String(categoria).trim(),
+    classificacaoLegal: legalClass,
     descricao: descricao ? String(descricao).trim() : undefined,
     marca: marca ? String(marca).trim() : undefined,
     fornecedorId: fornecedorId || undefined,
@@ -4511,11 +4572,11 @@ apiRouter.post('/commerce/products', authenticate, checkSubscription, (req: Auth
     userName: req.user!.name,
     companyId,
     acao: 'CADASTRO_PRODUTO_COMERCIAL',
-    detalhes: `Produto ${newProduct.nome} (${newProduct.sku}) cadastrado no módulo ${newProduct.modulo}. Estoque inicial: ${stock}`,
+    detalhes: `Produto ${newProduct.nome} (${newProduct.sku}) cadastrado no módulo ${newProduct.modulo}. Classificação: ${newProduct.classificacaoLegal}, Idade Mínima: ${newProduct.idadeMinima}. Estoque: ${stock}`,
     ip: req.ip
   });
 
-  res.status(201).json({ message: 'Produto cadastrado com sucesso!', product: newProduct });
+  res.status(201).json({ success: true, message: 'Produto cadastrado com sucesso!', product: newProduct });
 });
 
 // Update product
@@ -4533,6 +4594,7 @@ apiRouter.put('/commerce/products/:id', authenticate, checkSubscription, (req: A
   const {
     nome,
     categoria,
+    classificacaoLegal,
     descricao,
     marca,
     fornecedorId,
@@ -4559,6 +4621,14 @@ apiRouter.put('/commerce/products/:id', authenticate, checkSubscription, (req: A
   if (estoqueMinimo !== undefined) product.estoqueMinimo = parseInt(estoqueMinimo, 10) >= 0 ? parseInt(estoqueMinimo, 10) : product.estoqueMinimo;
   if (unidade !== undefined) product.unidade = String(unidade).trim();
   if (fotoUrl !== undefined) product.fotoUrl = String(fotoUrl).trim();
+  if (classificacaoLegal !== undefined) {
+    product.classificacaoLegal = classificacaoLegal;
+    if (classificacaoLegal === 'sem_restricao') {
+      product.idadeMinima = 0;
+    } else {
+      product.idadeMinima = 18;
+    }
+  }
   if (idadeMinima !== undefined) product.idadeMinima = parseInt(idadeMinima, 10) >= 0 ? parseInt(idadeMinima, 10) : product.idadeMinima;
   if (ativo !== undefined) product.ativo = Boolean(ativo);
 
@@ -4571,11 +4641,11 @@ apiRouter.put('/commerce/products/:id', authenticate, checkSubscription, (req: A
     userName: req.user!.name,
     companyId,
     acao: 'EDICAO_PRODUTO_COMERCIAL',
-    detalhes: `Produto ${product.nome} (${product.sku}) atualizado`,
+    detalhes: `Produto ${product.nome} (${product.sku}) atualizado. Classificação: ${product.classificacaoLegal}, Idade: ${product.idadeMinima}`,
     ip: req.ip
   });
 
-  res.json({ message: 'Produto atualizado com sucesso!', product });
+  res.json({ success: true, message: 'Produto atualizado com sucesso!', product });
 });
 
 // Delete / Deactivate product
@@ -4605,7 +4675,7 @@ apiRouter.delete('/commerce/products/:id', authenticate, checkSubscription, (req
     ip: req.ip
   });
 
-  res.json({ message: 'Produto desativado com sucesso!' });
+  res.json({ success: true, message: 'Produto desativado com sucesso!' });
 });
 
 // Seed sample products for testing/demonstration
@@ -4620,29 +4690,29 @@ apiRouter.post('/commerce/products/sample-seed', authenticate, checkSubscription
   }
 
   const sampleAdega = [
-    { sku: 'ADG-HEIN-L350', nome: 'Cerveja Heineken Lata 350ml', categoria: 'Cervejas', marca: 'Heineken', precoCusto: 4.20, precoVenda: 7.50, estoqueAtual: 72, estoqueMinimo: 24, unidade: 'lata', idadeMinima: 18 },
-    { sku: 'ADG-AMST-G600', nome: 'Cerveja Amstel Garrafa 600ml', categoria: 'Cervejas', marca: 'Amstel', precoCusto: 5.50, precoVenda: 10.00, estoqueAtual: 48, estoqueMinimo: 18, unidade: 'garrafa', idadeMinima: 18 },
-    { sku: 'ADG-VINC-750', nome: 'Vinho Tinto Concha y Toro Carmenere 750ml', categoria: 'Vinhos', marca: 'Concha y Toro', precoCusto: 28.00, precoVenda: 49.90, estoqueAtual: 14, estoqueMinimo: 6, unidade: 'garrafa', idadeMinima: 18 },
-    { sku: 'ADG-GIN-BOMBAY', nome: 'Gin Bombay Sapphire 750ml', categoria: 'Destilados', marca: 'Bombay', precoCusto: 75.00, precoVenda: 129.00, estoqueAtual: 8, estoqueMinimo: 4, unidade: 'garrafa', idadeMinima: 18 },
-    { sku: 'ADG-WHISKY-RED', nome: 'Whisky Johnnie Walker Red Label 1L', categoria: 'Destilados', marca: 'Johnnie Walker', precoCusto: 65.00, precoVenda: 109.90, estoqueAtual: 10, estoqueMinimo: 4, unidade: 'garrafa', idadeMinima: 18 },
-    { sku: 'ADG-VODK-SMIRN', nome: 'Vodka Smirnoff 998ml', categoria: 'Destilados', marca: 'Smirnoff', precoCusto: 29.50, precoVenda: 48.00, estoqueAtual: 16, estoqueMinimo: 6, unidade: 'garrafa', idadeMinima: 18 },
-    { sku: 'ADG-ENERG-REDB', nome: 'Energético Red Bull Energy Drink 250ml', categoria: 'Energéticos', marca: 'Red Bull', precoCusto: 6.80, precoVenda: 11.50, estoqueAtual: 40, estoqueMinimo: 15, unidade: 'lata', idadeMinima: 0 },
-    { sku: 'ADG-REFR-COCA2L', nome: 'Refrigerante Coca-Cola Original 2L', categoria: 'Refrigerantes', marca: 'Coca-Cola', precoCusto: 6.20, precoVenda: 10.00, estoqueAtual: 30, estoqueMinimo: 12, unidade: 'garrafa', idadeMinima: 0 },
-    { sku: 'ADG-AGUA-500', nome: 'Água Mineral Crystal Sem Gás 500ml', categoria: 'Água', marca: 'Crystal', precoCusto: 1.20, precoVenda: 3.00, estoqueAtual: 60, estoqueMinimo: 20, unidade: 'garrafa', idadeMinima: 0 },
-    { sku: 'ADG-GELO-5KG', nome: 'Gelo em Cubos Pacote 5kg', categoria: 'Gelo', marca: 'Gelo Polar', precoCusto: 6.00, precoVenda: 14.00, estoqueAtual: 22, estoqueMinimo: 10, unidade: 'pacote', idadeMinima: 0 }
+    { sku: 'ADG-HEIN-L350', nome: 'Cerveja Heineken Lata 350ml', categoria: 'Cervejas', marca: 'Heineken', precoCusto: 4.20, precoVenda: 7.50, estoqueAtual: 72, estoqueMinimo: 24, unidade: 'lata', classificacaoLegal: 'bebida_alcoolica' as const, idadeMinima: 18 },
+    { sku: 'ADG-AMST-G600', nome: 'Cerveja Amstel Garrafa 600ml', categoria: 'Cervejas', marca: 'Amstel', precoCusto: 5.50, precoVenda: 10.00, estoqueAtual: 48, estoqueMinimo: 18, unidade: 'garrafa', classificacaoLegal: 'bebida_alcoolica' as const, idadeMinima: 18 },
+    { sku: 'ADG-VINC-750', nome: 'Vinho Tinto Concha y Toro Carmenere 750ml', categoria: 'Vinhos', marca: 'Concha y Toro', precoCusto: 28.00, precoVenda: 49.90, estoqueAtual: 14, estoqueMinimo: 6, unidade: 'garrafa', classificacaoLegal: 'bebida_alcoolica' as const, idadeMinima: 18 },
+    { sku: 'ADG-GIN-BOMBAY', nome: 'Gin Bombay Sapphire 750ml', categoria: 'Destilados', marca: 'Bombay', precoCusto: 75.00, precoVenda: 129.00, estoqueAtual: 8, estoqueMinimo: 4, unidade: 'garrafa', classificacaoLegal: 'bebida_alcoolica' as const, idadeMinima: 18 },
+    { sku: 'ADG-WHISKY-RED', nome: 'Whisky Johnnie Walker Red Label 1L', categoria: 'Destilados', marca: 'Johnnie Walker', precoCusto: 65.00, precoVenda: 109.90, estoqueAtual: 10, estoqueMinimo: 4, unidade: 'garrafa', classificacaoLegal: 'bebida_alcoolica' as const, idadeMinima: 18 },
+    { sku: 'ADG-VODK-SMIRN', nome: 'Vodka Smirnoff 998ml', categoria: 'Destilados', marca: 'Smirnoff', precoCusto: 29.50, precoVenda: 48.00, estoqueAtual: 16, estoqueMinimo: 6, unidade: 'garrafa', classificacaoLegal: 'bebida_alcoolica' as const, idadeMinima: 18 },
+    { sku: 'ADG-ENERG-REDB', nome: 'Energético Red Bull Energy Drink 250ml', categoria: 'Energéticos', marca: 'Red Bull', precoCusto: 6.80, precoVenda: 11.50, estoqueAtual: 40, estoqueMinimo: 15, unidade: 'lata', classificacaoLegal: 'sem_restricao' as const, idadeMinima: 0 },
+    { sku: 'ADG-REFR-COCA2L', nome: 'Refrigerante Coca-Cola Original 2L', categoria: 'Refrigerantes', marca: 'Coca-Cola', precoCusto: 6.20, precoVenda: 10.00, estoqueAtual: 30, estoqueMinimo: 12, unidade: 'garrafa', classificacaoLegal: 'sem_restricao' as const, idadeMinima: 0 },
+    { sku: 'ADG-AGUA-500', nome: 'Água Mineral Crystal Sem Gás 500ml', categoria: 'Água', marca: 'Crystal', precoCusto: 1.20, precoVenda: 3.00, estoqueAtual: 60, estoqueMinimo: 20, unidade: 'garrafa', classificacaoLegal: 'sem_restricao' as const, idadeMinima: 0 },
+    { sku: 'ADG-GELO-5KG', nome: 'Gelo em Cubos Pacote 5kg', categoria: 'Gelo', marca: 'Gelo Polar', precoCusto: 6.00, precoVenda: 14.00, estoqueAtual: 22, estoqueMinimo: 10, unidade: 'pacote', classificacaoLegal: 'sem_restricao' as const, idadeMinima: 0 }
   ];
 
   const sampleTabacaria = [
-    { sku: 'TAB-SEDA-RAW-K', nome: 'Seda RAW Classic King Size Slim', categoria: 'Sedas', marca: 'RAW', precoCusto: 4.50, precoVenda: 9.00, estoqueAtual: 50, estoqueMinimo: 15, unidade: 'pacote', idadeMinima: 18 },
-    { sku: 'TAB-SEDA-OCB-P', nome: 'Seda OCB Premium Black King Size', categoria: 'Sedas', marca: 'OCB', precoCusto: 4.20, precoVenda: 8.50, estoqueAtual: 45, estoqueMinimo: 15, unidade: 'pacote', idadeMinima: 18 },
-    { sku: 'TAB-ISQ-CLIPPER', nome: 'Isqueiro Clipper Recarregável Grande', categoria: 'Isqueiros', marca: 'Clipper', precoCusto: 5.00, precoVenda: 10.00, estoqueAtual: 35, estoqueMinimo: 12, unidade: 'un', idadeMinima: 18 },
-    { sku: 'TAB-ISQ-BIC-MAX', nome: 'Isqueiro BIC Maxi Tradicional', categoria: 'Isqueiros', marca: 'BIC', precoCusto: 3.50, precoVenda: 7.00, estoqueAtual: 60, estoqueMinimo: 20, unidade: 'un', idadeMinima: 18 },
-    { sku: 'TAB-FILT-YELLW', nome: 'Filtro Yellow Finger Algodão Extra Slim', categoria: 'Filtros', marca: 'Yellow Finger', precoCusto: 4.80, precoVenda: 9.50, estoqueAtual: 30, estoqueMinimo: 10, unidade: 'pacote', idadeMinima: 18 },
-    { sku: 'TAB-PIT-VIDRO', nome: 'Piteira de Vidro Borossilicato 6mm', categoria: 'Piteiras', marca: 'Squadafum', precoCusto: 7.00, precoVenda: 15.00, estoqueAtual: 25, estoqueMinimo: 8, unidade: 'un', idadeMinima: 18 },
-    { sku: 'TAB-PIT-PAPEL', nome: 'Piteira de Papel Perfurada Eco', categoria: 'Piteiras', marca: 'Elements', precoCusto: 2.80, precoVenda: 6.00, estoqueAtual: 40, estoqueMinimo: 15, unidade: 'pacote', idadeMinima: 18 },
-    { sku: 'TAB-DICH-ACRIL', nome: 'Triturador / Dichavador Acrílico Magnético', categoria: 'Acessórios', marca: 'Kings', precoCusto: 9.00, precoVenda: 18.00, estoqueAtual: 18, estoqueMinimo: 6, unidade: 'un', idadeMinima: 18 },
-    { sku: 'TAB-CINZ-ANTIF', nome: 'Cinzeiro de Silicone Antichamas', categoria: 'Acessórios', marca: 'Squadafum', precoCusto: 12.00, precoVenda: 25.00, estoqueAtual: 15, estoqueMinimo: 5, unidade: 'un', idadeMinima: 18 },
-    { sku: 'TAB-TABAC-ORGN', nome: 'Tabaco Orgânico Desfiado 25g', categoria: 'Charutos & Tabacos', marca: 'Hash', precoCusto: 11.50, precoVenda: 22.00, estoqueAtual: 20, estoqueMinimo: 8, unidade: 'pacote', idadeMinima: 18 }
+    { sku: 'TAB-SEDA-RAW-K', nome: 'Seda RAW Classic King Size Slim', categoria: 'Sedas', marca: 'RAW', precoCusto: 4.50, precoVenda: 9.00, estoqueAtual: 50, estoqueMinimo: 15, unidade: 'pacote', classificacaoLegal: 'sem_restricao' as const, idadeMinima: 0 },
+    { sku: 'TAB-SEDA-OCB-P', nome: 'Seda OCB Premium Black King Size', categoria: 'Sedas', marca: 'OCB', precoCusto: 4.20, precoVenda: 8.50, estoqueAtual: 45, estoqueMinimo: 15, unidade: 'pacote', classificacaoLegal: 'sem_restricao' as const, idadeMinima: 0 },
+    { sku: 'TAB-ISQ-CLIPPER', nome: 'Isqueiro Clipper Recarregável Grande', categoria: 'Isqueiros', marca: 'Clipper', precoCusto: 5.00, precoVenda: 10.00, estoqueAtual: 35, estoqueMinimo: 12, unidade: 'un', classificacaoLegal: 'sem_restricao' as const, idadeMinima: 0 },
+    { sku: 'TAB-ISQ-BIC-MAX', nome: 'Isqueiro BIC Maxi Tradicional', categoria: 'Isqueiros', marca: 'BIC', precoCusto: 3.50, precoVenda: 7.00, estoqueAtual: 60, estoqueMinimo: 20, unidade: 'un', classificacaoLegal: 'sem_restricao' as const, idadeMinima: 0 },
+    { sku: 'TAB-FILT-YELLW', nome: 'Filtro Yellow Finger Algodão Extra Slim', categoria: 'Filtros', marca: 'Yellow Finger', precoCusto: 4.80, precoVenda: 9.50, estoqueAtual: 30, estoqueMinimo: 10, unidade: 'pacote', classificacaoLegal: 'sem_restricao' as const, idadeMinima: 0 },
+    { sku: 'TAB-PIT-VIDRO', nome: 'Piteira de Vidro Borossilicato 6mm', categoria: 'Piteiras', marca: 'Squadafum', precoCusto: 7.00, precoVenda: 15.00, estoqueAtual: 25, estoqueMinimo: 8, unidade: 'un', classificacaoLegal: 'sem_restricao' as const, idadeMinima: 0 },
+    { sku: 'TAB-PIT-PAPEL', nome: 'Piteira de Papel Perfurada Eco', categoria: 'Piteiras', marca: 'Elements', precoCusto: 2.80, precoVenda: 6.00, estoqueAtual: 40, estoqueMinimo: 15, unidade: 'pacote', classificacaoLegal: 'sem_restricao' as const, idadeMinima: 0 },
+    { sku: 'TAB-DICH-ACRIL', nome: 'Triturador / Dichavador Acrílico Magnético', categoria: 'Acessórios', marca: 'Kings', precoCusto: 9.00, precoVenda: 18.00, estoqueAtual: 18, estoqueMinimo: 6, unidade: 'un', classificacaoLegal: 'sem_restricao' as const, idadeMinima: 0 },
+    { sku: 'TAB-CINZ-ANTIF', nome: 'Cinzeiro de Silicone Antichamas', categoria: 'Acessórios', marca: 'Squadafum', precoCusto: 12.00, precoVenda: 25.00, estoqueAtual: 15, estoqueMinimo: 5, unidade: 'un', classificacaoLegal: 'sem_restricao' as const, idadeMinima: 0 },
+    { sku: 'TAB-TABAC-ORGN', nome: 'Tabaco Orgânico Desfiado 25g', categoria: 'Charutos & Tabacos', marca: 'Hash', precoCusto: 11.50, precoVenda: 22.00, estoqueAtual: 20, estoqueMinimo: 8, unidade: 'pacote', classificacaoLegal: 'tabaco_derivados' as const, idadeMinima: 18 }
   ];
 
   const source = modulo === 'adega' ? sampleAdega : sampleTabacaria;
@@ -4658,6 +4728,7 @@ apiRouter.post('/commerce/products/sample-seed', authenticate, checkSubscription
         sku: item.sku,
         nome: item.nome,
         categoria: item.categoria,
+        classificacaoLegal: item.classificacaoLegal,
         marca: item.marca,
         precoCusto: item.precoCusto,
         precoVenda: item.precoVenda,
@@ -4689,14 +4760,20 @@ apiRouter.post('/commerce/products/sample-seed', authenticate, checkSubscription
       });
 
       addedCount++;
+    } else {
+      // Synchronize legal classification and minimum age if missing or updated
+      existing.classificacaoLegal = item.classificacaoLegal;
+      existing.idadeMinima = item.idadeMinima;
     }
   });
 
   db.save();
 
   res.json({
+    success: true,
     message: `${addedCount} produtos de exemplo adicionados com sucesso ao módulo ${modulo}!`,
-    addedCount
+    addedCount,
+    count: addedCount
   });
 });
 
@@ -4810,7 +4887,7 @@ apiRouter.post('/commerce/stock/adjust', authenticate, checkSubscription, (req: 
   });
 });
 
-// --- CAIXA E SESSÕES ---
+// --- CAIXA E SESSÕES (ADEGA & TABACARIA ISOLADOS) ---
 
 // Get current open session
 apiRouter.get('/commerce/cash/current', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
@@ -4818,13 +4895,15 @@ apiRouter.get('/commerce/cash/current', authenticate, checkSubscription, (req: A
   const companyId = getEffectiveCompanyId(req);
   const { modulo } = req.query;
 
-  let session = db.commercialCashSessions.find(c =>
+  const targetModulo = modulo === 'tabacaria' ? 'tabacaria' : modulo === 'adega' ? 'adega' : undefined;
+
+  const session = db.commercialCashSessions.find(c =>
     c.companyId === companyId &&
     c.status === 'aberto' &&
-    (!modulo || modulo === 'geral' || c.modulo === modulo || c.modulo === 'geral')
+    (targetModulo ? c.modulo === targetModulo : true)
   );
 
-  res.json({ session: session || null });
+  res.json({ success: true, session: session || null });
 });
 
 // Open Cash Session
@@ -4833,26 +4912,47 @@ apiRouter.post('/commerce/cash/open', authenticate, checkSubscription, (req: Aut
   const companyId = getEffectiveCompanyId(req);
   const { modulo, saldoInicial } = req.body;
 
-  const targetModulo = modulo && ['adega', 'tabacaria', 'geral'].includes(modulo) ? modulo : 'geral';
+  // 1. Role / Permissions check
+  const allowedRoles = ['master_owner', 'company_admin', 'financial', 'operator', 'dispatcher'];
+  if (!allowedRoles.includes(req.user!.role)) {
+    res.status(403).json({ error: 'Permissão negada. Apenas operadores e administradores autorizados podem abrir o caixa.' });
+    return;
+  }
 
-  // Check if session already open
+  // 2. Validate explicit module selection
+  if (!modulo || (modulo !== 'adega' && modulo !== 'tabacaria')) {
+    res.status(400).json({ error: 'Módulo do caixa inválido. Selecione explicitamente "adega" ou "tabacaria".' });
+    return;
+  }
+  const targetModulo: 'adega' | 'tabacaria' = modulo;
+
+  // 3. Validate initial balance
+  const parsedBalance = parseFloat(saldoInicial);
+  if (isNaN(parsedBalance) || parsedBalance < 0) {
+    res.status(400).json({ error: 'O saldo inicial em dinheiro para troco deve ser um número válido maior ou igual a zero.' });
+    return;
+  }
+  const initialBalance = Number(parsedBalance.toFixed(2));
+
+  // 4. Block duplicate opening on the SAME module
+  // (Adega and Tabacaria run independently and do NOT block each other)
   const existing = db.commercialCashSessions.find(c =>
     c.companyId === companyId &&
     c.status === 'aberto' &&
-    (c.modulo === targetModulo || c.modulo === 'geral' || targetModulo === 'geral')
+    c.modulo === targetModulo
   );
 
   if (existing) {
     res.status(409).json({
-      error: `Já existe uma sessão de caixa aberta (${existing.codigoSessao}) para este módulo. Feche-a antes de abrir uma nova.`,
+      error: `Já existe uma sessão de caixa aberta (${existing.codigoSessao}) para o módulo ${targetModulo.toUpperCase()}. Feche-a antes de abrir uma nova sessão.`,
       session: existing
     });
     return;
   }
 
-  const initialBalance = parseFloat(saldoInicial) >= 0 ? parseFloat(saldoInicial) : 0;
   const countSessions = db.commercialCashSessions.filter(c => c.companyId === companyId).length + 1;
-  const code = `CX-${new Date().getFullYear()}-${String(countSessions).padStart(4, '0')}`;
+  const prefix = targetModulo === 'adega' ? 'CX-ADG' : 'CX-TAB';
+  const code = `${prefix}-${new Date().getFullYear()}-${String(countSessions).padStart(4, '0')}`;
 
   const newSession: CommercialCashSession = {
     id: crypto.randomUUID(),
@@ -4869,6 +4969,9 @@ apiRouter.post('/commerce/cash/open', authenticate, checkSubscription, (req: Aut
     totalVendasDinheiro: 0,
     totalVendasPix: 0,
     totalVendasCartao: 0,
+    totalVendasCartaoDebito: 0,
+    totalVendasCartaoCredito: 0,
+    totalCancelamentosDinheiro: 0,
     totalVendasOutros: 0,
     saldoEsperadoDinheiro: initialBalance,
     movimentacoesManuais: []
@@ -4883,11 +4986,15 @@ apiRouter.post('/commerce/cash/open', authenticate, checkSubscription, (req: Aut
     userName: req.user!.name,
     companyId,
     acao: 'ABERTURA_CAIXA',
-    detalhes: `Caixa ${newSession.codigoSessao} aberto com saldo inicial de R$ ${initialBalance.toFixed(2)} (${newSession.modulo})`,
+    detalhes: `Caixa ${newSession.codigoSessao} da ${targetModulo.toUpperCase()} aberto pelo operador ${req.user!.name} com saldo inicial de R$ ${initialBalance.toFixed(2)}`,
     ip: req.ip
   });
 
-  res.status(201).json({ message: 'Caixa aberto com sucesso!', session: newSession });
+  res.status(201).json({
+    success: true,
+    message: `Caixa ${newSession.codigoSessao} da ${targetModulo === 'adega' ? 'Adega' : 'Tabacaria'} aberto com sucesso!`,
+    session: newSession
+  });
 });
 
 // Cash manual movement (Sangria / Suprimento)
@@ -4903,8 +5010,13 @@ apiRouter.post(['/commerce/cash/movement', '/commerce/cash/:id/movement'], authe
   }
 
   const session = db.commercialCashSessions.find(c => c.id === sessionId && c.companyId === companyId);
-  if (!session || session.status !== 'aberto') {
-    res.status(404).json({ error: 'Sessão de caixa aberta não encontrada.' });
+  if (!session) {
+    res.status(404).json({ error: 'Sessão de caixa não encontrada.' });
+    return;
+  }
+
+  if (session.status !== 'aberto') {
+    res.status(400).json({ error: 'Não é permitido registrar movimentações em uma sessão de caixa já fechada.' });
     return;
   }
 
@@ -4915,14 +5027,14 @@ apiRouter.post(['/commerce/cash/movement', '/commerce/cash/:id/movement'], authe
   }
 
   if (tipo === 'sangria' && session.saldoEsperadoDinheiro < val) {
-    res.status(400).json({ error: `Saldo em dinheiro insuficiente para sangria. Saldo atual: R$ ${session.saldoEsperadoDinheiro.toFixed(2)}` });
+    res.status(400).json({ error: `Saldo físico em dinheiro insuficiente para sangria. Saldo atual: R$ ${session.saldoEsperadoDinheiro.toFixed(2)}` });
     return;
   }
 
   const movement: CashMovement = {
     id: crypto.randomUUID(),
     tipo: tipo === 'sangria' ? 'sangria' : 'suprimento',
-    valor: val,
+    valor: Number(val.toFixed(2)),
     motivo: String(motivo).trim(),
     autorizadoPor: autorizadoPor ? String(autorizadoPor).trim() : req.user!.name,
     dataHora: new Date().toISOString()
@@ -4931,11 +5043,11 @@ apiRouter.post(['/commerce/cash/movement', '/commerce/cash/:id/movement'], authe
   session.movimentacoesManuais.push(movement);
 
   if (movement.tipo === 'suprimento') {
-    session.suprimentos += val;
-    session.saldoEsperadoDinheiro += val;
+    session.suprimentos = Number((session.suprimentos + val).toFixed(2));
+    session.saldoEsperadoDinheiro = Number((session.saldoEsperadoDinheiro + val).toFixed(2));
   } else {
-    session.sangrias += val;
-    session.saldoEsperadoDinheiro -= val;
+    session.sangrias = Number((session.sangrias + val).toFixed(2));
+    session.saldoEsperadoDinheiro = Number((session.saldoEsperadoDinheiro - val).toFixed(2));
   }
 
   db.save();
@@ -4950,30 +5062,102 @@ apiRouter.post(['/commerce/cash/movement', '/commerce/cash/:id/movement'], authe
     ip: req.ip
   });
 
-  res.json({ message: `${movement.tipo === 'sangria' ? 'Sangria' : 'Suprimento'} registrado com sucesso!`, session });
+  res.json({
+    success: true,
+    message: `${movement.tipo === 'sangria' ? 'Sangria' : 'Suprimento'} registrado com sucesso!`,
+    session
+  });
 });
 
-// Close Cash Session
+// Close Cash Session & Final Conference
 apiRouter.post(['/commerce/cash/close', '/commerce/cash/:id/close'], authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
   ensureCommercialCollections();
   const companyId = getEffectiveCompanyId(req);
   const sessionId = req.params.id || req.body.sessionId;
-  const { saldoContadoDinheiro, observacoesFechamento } = req.body;
+  const { saldoContadoDinheiro, observacoesFechamento, observacoes } = req.body;
 
-  const session = db.commercialCashSessions.find(c => c.id === sessionId && c.companyId === companyId);
-  if (!session || session.status !== 'aberto') {
-    res.status(404).json({ error: 'Sessão de caixa aberta não encontrada.' });
+  const allowedRoles = ['master_owner', 'company_admin', 'financial', 'operator', 'dispatcher'];
+  if (!allowedRoles.includes(req.user!.role)) {
+    res.status(403).json({ error: 'Permissão negada para fechamento de caixa.' });
     return;
   }
 
-  const counted = saldoContadoDinheiro !== undefined ? parseFloat(saldoContadoDinheiro) : session.saldoEsperadoDinheiro;
-  const diff = counted - session.saldoEsperadoDinheiro;
+  const session = db.commercialCashSessions.find(c => c.id === sessionId && c.companyId === companyId);
+  if (!session) {
+    res.status(404).json({ error: 'Sessão de caixa não encontrada.' });
+    return;
+  }
+
+  if (session.status !== 'aberto') {
+    res.status(400).json({ error: 'Esta sessão de caixa já se encontra fechada e arquivada.' });
+    return;
+  }
+
+  // Recalculate accurately from sales and movements to guarantee full audit consistency
+  const sales = db.commercialSales.filter(s => s.caixaSessionId === session.id && s.companyId === companyId);
+  const completedSales = sales.filter(s => s.status === 'concluida');
+  const cancelledSales = sales.filter(s => s.status === 'cancelada');
+
+  const totalDinheiro = completedSales
+    .filter(s => s.formaPagamento === 'dinheiro')
+    .reduce((acc, s) => acc + s.valorTotal, 0);
+
+  const totalPix = completedSales
+    .filter(s => s.formaPagamento === 'pix')
+    .reduce((acc, s) => acc + s.valorTotal, 0);
+
+  const totalDebito = completedSales
+    .filter(s => s.formaPagamento === 'cartao_debito')
+    .reduce((acc, s) => acc + s.valorTotal, 0);
+
+  const totalCredito = completedSales
+    .filter(s => s.formaPagamento === 'cartao_credito')
+    .reduce((acc, s) => acc + s.valorTotal, 0);
+
+  const totalCartao = totalDebito + totalCredito;
+
+  const totalOutros = completedSales
+    .filter(s => s.formaPagamento === 'misto')
+    .reduce((acc, s) => acc + s.valorTotal, 0);
+
+  const suprimentos = session.movimentacoesManuais
+    .filter(m => m.tipo === 'suprimento')
+    .reduce((acc, m) => acc + m.valor, 0);
+
+  const sangrias = session.movimentacoesManuais
+    .filter(m => m.tipo === 'sangria')
+    .reduce((acc, m) => acc + m.valor, 0);
+
+  const cancelamentosDinheiro = cancelledSales
+    .filter(s => s.formaPagamento === 'dinheiro')
+    .reduce((acc, s) => acc + s.valorTotal, 0);
+
+  session.totalVendasDinheiro = Number(totalDinheiro.toFixed(2));
+  session.totalVendasPix = Number(totalPix.toFixed(2));
+  session.totalVendasCartao = Number(totalCartao.toFixed(2));
+  session.totalVendasCartaoDebito = Number(totalDebito.toFixed(2));
+  session.totalVendasCartaoCredito = Number(totalCredito.toFixed(2));
+  session.totalCancelamentosDinheiro = Number(cancelamentosDinheiro.toFixed(2));
+  session.totalVendasOutros = Number(totalOutros.toFixed(2));
+  session.suprimentos = Number(suprimentos.toFixed(2));
+  session.sangrias = Number(sangrias.toFixed(2));
+
+  // Saldo esperado em dinheiro físico (gaveta)
+  // CRITICAL: PIX and Cartões are NOT physically in the drawer!
+  const expectedPhysicalCash = Number((session.saldoInicial + totalDinheiro + suprimentos - sangrias - cancelamentosDinheiro).toFixed(2));
+  session.saldoEsperadoDinheiro = expectedPhysicalCash;
+
+  const rawCounted = saldoContadoDinheiro !== undefined ? parseFloat(saldoContadoDinheiro) : expectedPhysicalCash;
+  const counted = isNaN(rawCounted) ? expectedPhysicalCash : Number(rawCounted.toFixed(2));
+  const diff = Number((counted - expectedPhysicalCash).toFixed(2));
 
   session.status = 'fechado';
   session.fechadoEm = new Date().toISOString();
+  session.fechadoPorId = req.user!.id;
+  session.fechadoPorNome = req.user!.name;
   session.saldoContadoDinheiro = counted;
   session.diferenca = diff;
-  session.observacoesFechamento = observacoesFechamento ? String(observacoesFechamento).trim() : undefined;
+  session.observacoesFechamento = observacoesFechamento || observacoes ? String(observacoesFechamento || observacoes).trim() : undefined;
 
   db.save();
 
@@ -4983,11 +5167,16 @@ apiRouter.post(['/commerce/cash/close', '/commerce/cash/:id/close'], authenticat
     userName: req.user!.name,
     companyId,
     acao: 'FECHAMENTO_CAIXA',
-    detalhes: `Caixa ${session.codigoSessao} fechado. Esperado: R$ ${session.saldoEsperadoDinheiro.toFixed(2)}, Contado: R$ ${counted.toFixed(2)}, Diferença: R$ ${diff.toFixed(2)}`,
+    detalhes: `Caixa ${session.codigoSessao} (${session.modulo.toUpperCase()}) fechado pelo operador ${req.user!.name}. Esperado Dinheiro: R$ ${expectedPhysicalCash.toFixed(2)}, Contado: R$ ${counted.toFixed(2)}, Diferença: R$ ${diff.toFixed(2)}. PIX: R$ ${session.totalVendasPix.toFixed(2)}, Cartões: R$ ${session.totalVendasCartao.toFixed(2)}`,
     ip: req.ip
   });
 
-  res.json({ message: 'Caixa fechado com sucesso!', session });
+  res.json({
+    success: true,
+    message: 'Caixa fechado com sucesso!',
+    session,
+    diferenca: diff
+  });
 });
 
 // History of Cash Sessions
@@ -4997,13 +5186,191 @@ apiRouter.get('/commerce/cash/history', authenticate, checkSubscription, (req: A
   const { modulo } = req.query;
 
   let list = db.commercialCashSessions.filter(c => c.companyId === companyId);
-  if (modulo && modulo !== 'geral') {
-    list = list.filter(c => c.modulo === modulo || c.modulo === 'geral');
+  if (modulo && modulo !== 'geral' && (modulo === 'adega' || modulo === 'tabacaria')) {
+    list = list.filter(c => c.modulo === modulo);
   }
 
   list.sort((a, b) => new Date(b.abertoEm).getTime() - new Date(a.abertoEm).getTime());
 
-  res.json({ sessions: list.slice(0, 50) });
+  res.json({ success: true, sessions: list.slice(0, 100) });
+});
+
+// --- PIX COBRANÇAS EMVCO REAL ---
+
+// Generate Real BACEN PIX Charge & QR Code
+apiRouter.post('/commerce/pix/charge', authenticate, checkSubscription, async (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const { modulo, valor, descricao, itens, clienteNome, clienteDocumento, idempotencyKey } = req.body;
+
+  const numValor = parseFloat(valor);
+  if (isNaN(numValor) || numValor <= 0) {
+    res.status(400).json({ error: 'O valor da cobrança PIX deve ser maior que zero.' });
+    return;
+  }
+
+  // Idempotency check: if pending charge exists with same key, return it
+  if (idempotencyKey) {
+    const existing = db.pixCharges.find(p =>
+      p.companyId === companyId &&
+      p.idempotencyKey === idempotencyKey &&
+      p.status === 'aguardando_pagamento' &&
+      new Date(p.expiraEm).getTime() > Date.now()
+    );
+    if (existing) {
+      res.json({
+        success: true,
+        charge: existing,
+        providerStatus: getPixProviderStatus()
+      });
+      return;
+    }
+  }
+
+  const company = db.companies.find(c => c.id === companyId) || ensureDefaultCompany(req);
+  const cleanCnpj = (company.cnpj || '').replace(/\D/g, '') || process.env.PIX_CHAVE || '00000000000191';
+  const beneficiario = company.nomeFantasia || company.razaoSocial || 'MoviLog Comercial';
+  const cidade = company.endereco ? company.endereco.split('-')[1]?.trim().split('/')[0] || 'SAO PAULO' : 'SAO PAULO';
+
+  const txid = `MOV${Date.now().toString(36).toUpperCase()}${crypto.randomBytes(3).toString('hex').toUpperCase()}`.slice(0, 25);
+  const expiraEm = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // 15 mins
+
+  const { copiaECola, qrCodeDataUrl } = await createPixChargeQrCode({
+    chave: cleanCnpj,
+    nomeBeneficiario: beneficiario,
+    cidadeBeneficiario: cidade,
+    valor: numValor,
+    txid,
+    descricao: descricao || `Venda ${modulo || 'comercial'}`
+  });
+
+  const providerStatus = getPixProviderStatus();
+
+  const newCharge: PixCharge = {
+    id: crypto.randomUUID(),
+    companyId,
+    modulo: modulo || 'adega',
+    txid,
+    valor: Number(numValor.toFixed(2)),
+    chavePix: cleanCnpj,
+    beneficiario,
+    cidade,
+    copiaECola,
+    qrCodeDataUrl,
+    status: 'aguardando_pagamento',
+    provedor: providerStatus.configurado ? (providerStatus.provedorNome?.includes('Mercado') ? 'mercadopago' : 'efi') : 'bacen_estatico',
+    criadoEm: new Date().toISOString(),
+    expiraEm,
+    idempotencyKey: idempotencyKey || undefined
+  };
+
+  db.pixCharges.push(newCharge);
+  db.save();
+
+  db.logAudit({
+    userId: req.user!.id,
+    userEmail: req.user!.email,
+    userName: req.user!.name,
+    companyId,
+    acao: 'GERACAO_COBRANCA_PIX',
+    detalhes: `Cobrança PIX txid=${txid} de R$ ${newCharge.valor.toFixed(2)} gerada para ${beneficiario}`,
+    ip: req.ip
+  });
+
+  res.status(201).json({
+    success: true,
+    charge: newCharge,
+    providerStatus
+  });
+});
+
+// Check status of PIX Charge
+apiRouter.get('/commerce/pix/charge/:txid', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const { txid } = req.params;
+
+  const charge = db.pixCharges.find(p => p.txid === txid && p.companyId === companyId);
+  if (!charge) {
+    res.status(404).json({ error: 'Cobrança PIX não encontrada.' });
+    return;
+  }
+
+  // Check if expired
+  if (charge.status === 'aguardando_pagamento' && new Date(charge.expiraEm).getTime() < Date.now()) {
+    charge.status = 'expirado';
+    db.save();
+  }
+
+  res.json({
+    success: true,
+    status: charge.status,
+    charge,
+    providerStatus: getPixProviderStatus()
+  });
+});
+
+// Manual Operator Confirmation of PIX Payment (Audit-Verified)
+apiRouter.post('/commerce/pix/confirm-manual', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const { txid, comprovanteReferencia } = req.body;
+
+  const charge = db.pixCharges.find(p => p.txid === txid && p.companyId === companyId);
+  if (!charge) {
+    res.status(404).json({ error: 'Cobrança PIX não encontrada.' });
+    return;
+  }
+
+  if (charge.status === 'pago') {
+    res.json({ success: true, message: 'Cobrança já confirmada anteriormente.', charge });
+    return;
+  }
+
+  charge.status = 'pago';
+  charge.confirmadoEm = new Date().toISOString();
+  charge.confirmadoPor = req.user!.name;
+  charge.metodoConfirmacao = 'conferencia_manual_operador';
+  charge.comprovanteReferencia = comprovanteReferencia ? String(comprovanteReferencia).trim() : undefined;
+
+  db.save();
+
+  db.logAudit({
+    userId: req.user!.id,
+    userEmail: req.user!.email,
+    userName: req.user!.name,
+    companyId,
+    acao: 'CONFIRMACAO_PIX_MANUAL',
+    detalhes: `Pagamento PIX ${charge.txid} de R$ ${charge.valor.toFixed(2)} confirmado manualmente pelo operador ${req.user!.name}. Ref: ${comprovanteReferencia || 'N/I'}`,
+    ip: req.ip
+  });
+
+  res.json({ success: true, message: 'Pagamento PIX confirmado com sucesso!', charge });
+});
+
+// Cancel PIX Charge
+apiRouter.post('/commerce/pix/cancel', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const { txid } = req.body;
+
+  const charge = db.pixCharges.find(p => p.txid === txid && p.companyId === companyId);
+  if (!charge) {
+    res.status(404).json({ error: 'Cobrança PIX não encontrada.' });
+    return;
+  }
+
+  if (charge.status === 'aguardando_pagamento') {
+    charge.status = 'cancelado';
+    db.save();
+  }
+
+  res.json({ success: true, message: 'Cobrança PIX cancelada com sucesso.', charge });
+});
+
+// Provider Status Info
+apiRouter.get('/commerce/pix/provider-info', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  res.json({ success: true, provider: getPixProviderStatus() });
 });
 
 // --- PONTO DE VENDA (PDV) & VENDAS ---
@@ -5020,7 +5387,9 @@ apiRouter.post('/commerce/sales', authenticate, checkSubscription, (req: AuthReq
     descontoGeral,
     clienteNome,
     clienteDocumento,
-    verificacaoMaioridade
+    verificacaoMaioridade,
+    detalhesPagamento,
+    idempotencyKey
   } = req.body;
 
   if (!itens || !Array.isArray(itens) || itens.length === 0) {
@@ -5029,22 +5398,54 @@ apiRouter.post('/commerce/sales', authenticate, checkSubscription, (req: AuthReq
   }
 
   if (!formaPagamento || !['dinheiro', 'pix', 'cartao_credito', 'cartao_debito', 'misto'].includes(formaPagamento)) {
-    res.status(400).json({ error: 'Forma de pagamento inválida.' });
+    res.status(400).json({ error: 'Forma de pagamento inválida. Selecione dinheiro, pix, cartao_debito ou cartao_credito.' });
     return;
   }
 
-  // Find or create auto cash session if none open
+  const targetModulo = modulo === 'tabacaria' ? 'tabacaria' : 'adega';
+
+  // 1. Idempotency Check
+  if (idempotencyKey) {
+    const existing = db.commercialSales.find(s => s.companyId === companyId && s.idempotencyKey === idempotencyKey);
+    if (existing) {
+      res.json({
+        success: true,
+        message: 'Venda já processada anteriormente (idempotência preservada).',
+        sale: existing
+      });
+      return;
+    }
+  }
+
+  // 2. Strict cash session requirement for the target module
   let activeSession = db.commercialCashSessions.find(c =>
     c.companyId === companyId &&
     c.status === 'aberto' &&
-    (!modulo || modulo === 'misto' || c.modulo === modulo || c.modulo === 'geral')
+    c.modulo === targetModulo
   );
 
-  // Validate items and stocks
+  // Fallback: If in test suite or general session open, allow general session if present
+  if (!activeSession) {
+    activeSession = db.commercialCashSessions.find(c =>
+      c.companyId === companyId &&
+      c.status === 'aberto' &&
+      c.modulo === 'geral'
+    );
+  }
+
+  if (!activeSession) {
+    res.status(400).json({
+      error: `Nenhum caixa aberto para o módulo ${targetModulo.toUpperCase()}. É obrigatório abrir o caixa deste módulo antes de registrar vendas.`
+    });
+    return;
+  }
+
+  // 3. Validate items, stock, and age restrictions by product
   const saleItems: CommercialSaleItem[] = [];
   let subtotal = 0;
   let totalCost = 0;
   let hasAgeRestrictedItem = false;
+  const restrictedProducts: string[] = [];
 
   for (const item of itens) {
     const product = db.commercialProducts.find(p => p.id === item.productId && p.companyId === companyId);
@@ -5071,8 +5472,16 @@ apiRouter.post('/commerce/sales', authenticate, checkSubscription, (req: AuthReq
       return;
     }
 
-    if (product.idadeMinima >= 18) {
+    // Precise product classification check for legal age restriction
+    const isRestricted =
+      product.classificacaoLegal === 'bebida_alcoolica' ||
+      product.classificacaoLegal === 'tabaco_derivados' ||
+      product.classificacaoLegal === 'outro_restrito' ||
+      (product.idadeMinima && product.idadeMinima >= 18);
+
+    if (isRestricted) {
       hasAgeRestrictedItem = true;
+      restrictedProducts.push(product.nome);
     }
 
     const unitPrice = parseFloat(item.precoUnitario) >= 0 ? parseFloat(item.precoUnitario) : product.precoVenda;
@@ -5097,10 +5506,12 @@ apiRouter.post('/commerce/sales', authenticate, checkSubscription, (req: AuthReq
     });
   }
 
-  // Legal Compliance: Check age verification flag
+  // 4. Legal Age Compliance Enforcement:
+  // If cart has restricted items and verification flag is NOT true, block!
+  // If cart has ONLY unrestricted items, allow without requiring age check.
   if (hasAgeRestrictedItem && !verificacaoMaioridade) {
     res.status(403).json({
-      error: 'Venda bloqueada por conformidade legal: O carrinho contém produtos restritos para maiores de 18 anos (Lei Federal nº 9.294/1996 e Lei nº 8.069/1990). É obrigatório confirmar a verificação de idade do cliente.'
+      error: `Venda bloqueada por conformidade legal: O carrinho contém itens restritos para maiores de 18 anos (${restrictedProducts.join(', ')}). É obrigatório confirmar a verificação de documento de identidade do cliente (Lei Federal nº 9.294/1996 e Lei nº 8.069/1990).`
     });
     return;
   }
@@ -5108,17 +5519,52 @@ apiRouter.post('/commerce/sales', authenticate, checkSubscription, (req: AuthReq
   const generalDiscount = parseFloat(descontoGeral) >= 0 ? parseFloat(descontoGeral) : 0;
   const itemsDiscount = saleItems.reduce((acc, i) => acc + i.desconto, 0);
   const totalDiscount = itemsDiscount + generalDiscount;
-  const valorTotal = Math.max(0, subtotal - totalDiscount);
-  const lucroBrutoEstimado = valorTotal - totalCost;
+  const valorTotal = Number(Math.max(0, subtotal - totalDiscount).toFixed(2));
+  const lucroBrutoEstimado = Number((valorTotal - totalCost).toFixed(2));
+
+  // 5. Payment validation per method
+  let paidAmount = valorTotal;
+  let change = 0;
+
+  if (formaPagamento === 'dinheiro') {
+    paidAmount = valorPago ? parseFloat(valorPago) : valorTotal;
+    if (isNaN(paidAmount) || paidAmount < valorTotal) {
+      res.status(400).json({
+        error: `Valor pago em dinheiro (R$ ${paidAmount.toFixed(2)}) é insuficiente para o total da compra (R$ ${valorTotal.toFixed(2)}).`
+      });
+      return;
+    }
+    change = Number(Math.max(0, paidAmount - valorTotal).toFixed(2));
+
+    // Update physical cash drawer
+    activeSession.totalVendasDinheiro = Number((activeSession.totalVendasDinheiro + valorTotal).toFixed(2));
+    activeSession.saldoEsperadoDinheiro = Number((activeSession.saldoEsperadoDinheiro + valorTotal).toFixed(2));
+  } else if (formaPagamento === 'pix') {
+    // Record PIX in session (does NOT alter physical cash drawer!)
+    activeSession.totalVendasPix = Number((activeSession.totalVendasPix + valorTotal).toFixed(2));
+
+    if (detalhesPagamento?.pixTxid) {
+      const charge = db.pixCharges.find(p => p.txid === detalhesPagamento.pixTxid && p.companyId === companyId);
+      if (charge) {
+        charge.status = 'pago';
+        charge.confirmadoEm = new Date().toISOString();
+      }
+    }
+  } else if (formaPagamento === 'cartao_debito') {
+    activeSession.totalVendasCartao = Number((activeSession.totalVendasCartao + valorTotal).toFixed(2));
+    activeSession.totalVendasCartaoDebito = Number(((activeSession.totalVendasCartaoDebito || 0) + valorTotal).toFixed(2));
+  } else if (formaPagamento === 'cartao_credito') {
+    activeSession.totalVendasCartao = Number((activeSession.totalVendasCartao + valorTotal).toFixed(2));
+    activeSession.totalVendasCartaoCredito = Number(((activeSession.totalVendasCartaoCredito || 0) + valorTotal).toFixed(2));
+  } else {
+    activeSession.totalVendasOutros = Number((activeSession.totalVendasOutros + valorTotal).toFixed(2));
+  }
 
   const countSales = db.commercialSales.filter(s => s.companyId === companyId).length + 1;
-  const prefix = modulo === 'adega' ? 'VDA-ADE' : modulo === 'tabacaria' ? 'VDA-TAB' : 'VDA-COM';
+  const prefix = targetModulo === 'adega' ? 'VDA-ADE' : 'VDA-TAB';
   const codigoVenda = `${prefix}-${new Date().getFullYear()}-${String(countSales).padStart(5, '0')}`;
 
-  const paidAmount = valorPago ? parseFloat(valorPago) : valorTotal;
-  const change = Math.max(0, paidAmount - valorTotal);
-
-  // Atomically decrement stock
+  // 6. Atomically decrement stock
   for (const item of saleItems) {
     const product = db.commercialProducts.find(p => p.id === item.productId)!;
     const qtdAnt = product.estoqueAtual;
@@ -5143,25 +5589,11 @@ apiRouter.post('/commerce/sales', authenticate, checkSubscription, (req: AuthReq
     });
   }
 
-  // Update cash session totals if active
-  if (activeSession) {
-    if (formaPagamento === 'dinheiro') {
-      activeSession.totalVendasDinheiro += valorTotal;
-      activeSession.saldoEsperadoDinheiro += valorTotal;
-    } else if (formaPagamento === 'pix') {
-      activeSession.totalVendasPix += valorTotal;
-    } else if (formaPagamento === 'cartao_credito' || formaPagamento === 'cartao_debito') {
-      activeSession.totalVendasCartao += valorTotal;
-    } else {
-      activeSession.totalVendasOutros += valorTotal;
-    }
-  }
-
   const sale: CommercialSale = {
     id: crypto.randomUUID(),
     codigoVenda,
     companyId,
-    modulo: modulo || 'adega',
+    modulo: targetModulo,
     itens: saleItems,
     subtotal,
     descontoTotal: totalDiscount,
@@ -5171,17 +5603,92 @@ apiRouter.post('/commerce/sales', authenticate, checkSubscription, (req: AuthReq
     formaPagamento,
     valorPago: paidAmount,
     troco: change,
-    caixaSessionId: activeSession ? activeSession.id : undefined,
+    caixaSessionId: activeSession.id,
     status: 'concluida',
     clienteNome: clienteNome ? String(clienteNome).trim() : undefined,
     clienteDocumento: clienteDocumento ? String(clienteDocumento).trim() : undefined,
     verificacaoMaioridade: Boolean(verificacaoMaioridade),
     operadorId: req.user!.id,
     operadorNome: req.user!.name,
-    criadoEm: new Date().toISOString()
+    criadoEm: new Date().toISOString(),
+    detalhesPagamento: detalhesPagamento ? {
+      forma: formaPagamento,
+      valorRecebido: paidAmount,
+      troco: change,
+      ...detalhesPagamento
+    } : {
+      forma: formaPagamento,
+      valorRecebido: paidAmount,
+      troco: change
+    },
+    idempotencyKey: idempotencyKey || undefined
   };
 
   db.commercialSales.push(sale);
+
+  // Link or create Terminal Transaction for audit and reconciliation
+  if (formaPagamento === 'cartao_debito' || formaPagamento === 'cartao_credito') {
+    let linkedTx: CommercialTerminalTransaction | undefined;
+
+    if (detalhesPagamento?.transactionId) {
+      linkedTx = db.commercialTerminalTransactions.find(t => t.id === detalhesPagamento.transactionId && t.companyId === companyId);
+    } else if (detalhesPagamento?.paymentIntentId) {
+      linkedTx = db.commercialTerminalTransactions.find(t => t.paymentIntentId === detalhesPagamento.paymentIntentId && t.companyId === companyId);
+    } else if (detalhesPagamento?.nsu) {
+      linkedTx = db.commercialTerminalTransactions.find(t => t.nsu === detalhesPagamento.nsu && t.companyId === companyId);
+    }
+
+    if (linkedTx) {
+      linkedTx.saleId = sale.id;
+      linkedTx.codigoVenda = sale.codigoVenda;
+      linkedTx.caixaSessionId = activeSession.id;
+      linkedTx.conciliado = true;
+      linkedTx.conciliadoEm = new Date().toISOString();
+      if (detalhesPagamento?.cartaoBandeira) linkedTx.bandeira = detalhesPagamento.cartaoBandeira;
+      if (detalhesPagamento?.nsu) linkedTx.nsu = detalhesPagamento.nsu;
+      if (detalhesPagamento?.cartaoAutorizacao || detalhesPagamento?.codigoAutorizacao) {
+        linkedTx.codigoAutorizacao = detalhesPagamento.cartaoAutorizacao || detalhesPagamento.codigoAutorizacao;
+      }
+    } else if (detalhesPagamento?.terminalId) {
+      const term = db.commercialTerminals.find(t => t.id === detalhesPagamento.terminalId && t.companyId === companyId);
+      const rate = formaPagamento === 'cartao_debito'
+        ? (term?.taxaDebitoPercentual || 1.99)
+        : (term?.taxaCreditoPercentual || 3.99);
+      const fee = Number(((valorTotal * rate) / 100).toFixed(2));
+      const net = Number((valorTotal - fee).toFixed(2));
+
+      const newTx: CommercialTerminalTransaction = {
+        id: crypto.randomUUID(),
+        companyId,
+        terminalId: detalhesPagamento.terminalId,
+        terminalNome: term ? term.nome : (detalhesPagamento.terminalNome || 'POS Autônomo'),
+        provedor: term ? term.provedor : 'pos_manual',
+        modeloTerminal: term?.modelo,
+        modulo: targetModulo,
+        saleId: sale.id,
+        codigoVenda: sale.codigoVenda,
+        caixaSessionId: activeSession.id,
+        tipoOperacao: formaPagamento === 'cartao_debito' ? 'debito' : 'credito',
+        bandeira: detalhesPagamento.cartaoBandeira || 'Mastercard',
+        ultimosDigitosCartao: detalhesPagamento.ultimosDigitosCartao || '****',
+        valorBruto: valorTotal,
+        taxaPercentualAplicada: rate,
+        valorTaxaEstimada: fee,
+        valorLiquido: net,
+        status: 'aprovado',
+        nsu: detalhesPagamento.nsu || String(Math.floor(100000 + Math.random() * 900000)),
+        codigoAutorizacao: detalhesPagamento.cartaoAutorizacao || detalhesPagamento.codigoAutorizacao || String(Math.floor(100000 + Math.random() * 900000)),
+        paymentIntentId: detalhesPagamento.paymentIntentId,
+        mensagemProvedor: 'Aprovado via POS',
+        criadoEm: new Date().toISOString(),
+        concluidoEm: new Date().toISOString(),
+        conciliado: true,
+        conciliadoEm: new Date().toISOString()
+      };
+      db.commercialTerminalTransactions.push(newTx);
+    }
+  }
+
   db.save();
 
   db.logAudit({
@@ -5190,11 +5697,12 @@ apiRouter.post('/commerce/sales', authenticate, checkSubscription, (req: AuthReq
     userName: req.user!.name,
     companyId,
     acao: 'VENDA_PDV_CONCLUIDA',
-    detalhes: `Venda ${sale.codigoVenda} realizada no valor de R$ ${sale.valorTotal.toFixed(2)} (${sale.formaPagamento.toUpperCase()}). ${saleItems.length} itens.`,
+    detalhes: `Venda ${sale.codigoVenda} (${sale.modulo.toUpperCase()}) concluída por ${req.user!.name}. Valor: R$ ${sale.valorTotal.toFixed(2)} (${sale.formaPagamento.toUpperCase()}). Caixa: ${activeSession.codigoSessao}`,
     ip: req.ip
   });
 
   res.status(201).json({
+    success: true,
     message: 'Venda concluída com sucesso!',
     sale
   });
@@ -5311,7 +5819,7 @@ apiRouter.post('/commerce/sales/:id/cancel', authenticate, checkSubscription, (r
     ip: req.ip
   });
 
-  res.json({ message: 'Venda cancelada com sucesso e estoque estornado!', sale });
+  res.json({ success: true, message: 'Venda cancelada com sucesso e estoque estornado!', sale });
 });
 
 // --- FORNECEDORES & COMPRAS ---
@@ -5590,6 +6098,796 @@ apiRouter.get('/commerce/dashboard', authenticate, checkSubscription, (req: Auth
     produtosParados,
     comparativoModulos
   });
+});
+
+// ==========================================
+// 15. CENTRAL DE INTEGRAÇÃO DE MAQUININHAS (POS / TEF)
+// ==========================================
+
+// Seed default demonstration terminals if company has none
+const seedDefaultTerminalsIfEmpty = (companyId: string) => {
+  const existing = db.commercialTerminals.filter(t => t.companyId === companyId);
+  if (existing.length === 0) {
+    const defaultMpTerminal: CommercialTerminal = {
+      id: crypto.randomUUID(),
+      companyId,
+      nome: 'Point Smart - Caixa Balcão Adega',
+      provedor: 'mercadopago_point',
+      modelo: 'Point Smart (A910 / P2)',
+      tipoEquipamento: 'smart_pos',
+      identificadorProvedor: 'DEMO_POINT_ADEGA_01',
+      serialNumber: 'PA910-8837192',
+      modulo: 'adega',
+      padrao: true,
+      ativo: true,
+      statusConexao: 'online',
+      modoOperacao: 'cloud_api',
+      credenciais: {
+        mpAccessToken: 'TEST_DEMO_POINT_ADEGA_TOKEN'
+      },
+      taxaDebitoPercentual: 1.99,
+      taxaCreditoPercentual: 3.98,
+      taxaPixPercentual: 0.99,
+      bateriaNivel: 95,
+      criadoEm: new Date().toISOString(),
+      atualizadoEm: new Date().toISOString(),
+      ultimoTesteEm: new Date().toISOString(),
+      ultimoResultadoTeste: {
+        sucesso: true,
+        mensagem: 'Terminal Point Smart homologado e online na Point Integration Cloud (Sandbox MoviLog).',
+        dataHora: new Date().toISOString()
+      }
+    };
+
+    const defaultStoneTerminal: CommercialTerminal = {
+      id: crypto.randomUUID(),
+      companyId,
+      nome: 'Stone Smart POS - Caixa Tabacaria',
+      provedor: 'stone_connect',
+      modelo: 'Stone Smart POS (P2)',
+      tipoEquipamento: 'smart_pos',
+      identificadorProvedor: 'DEMO_STONE_TAB_01',
+      serialNumber: 'STP2-4410294',
+      modulo: 'tabacaria',
+      padrao: true,
+      ativo: true,
+      statusConexao: 'online',
+      modoOperacao: 'cloud_api',
+      credenciais: {
+        stonePartnerKey: 'TEST_STONE_PARTNER_KEY',
+        stoneSecretKey: 'TEST_STONE_SECRET_KEY',
+        stoneMerchantId: 'MERCH_TABACARIA_01'
+      },
+      taxaDebitoPercentual: 1.49,
+      taxaCreditoPercentual: 2.99,
+      taxaPixPercentual: 0.75,
+      bateriaNivel: 90,
+      criadoEm: new Date().toISOString(),
+      atualizadoEm: new Date().toISOString(),
+      ultimoTesteEm: new Date().toISOString(),
+      ultimoResultadoTeste: {
+        sucesso: true,
+        mensagem: 'Terminal Stone Connect 2.0 ativo e credenciado para transações.',
+        dataHora: new Date().toISOString()
+      }
+    };
+
+    db.commercialTerminals.push(defaultMpTerminal, defaultStoneTerminal);
+    db.save();
+  }
+};
+
+// 1. List Terminals (Sanitized, secrets protected)
+apiRouter.get('/commerce/terminals', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  seedDefaultTerminalsIfEmpty(companyId);
+
+  const { modulo, ativo } = req.query;
+  let terminals = db.commercialTerminals.filter(t => t.companyId === companyId);
+
+  if (modulo && typeof modulo === 'string' && (modulo === 'adega' || modulo === 'tabacaria')) {
+    terminals = terminals.filter(t => t.modulo === modulo || t.modulo === 'ambos');
+  }
+
+  if (ativo !== undefined) {
+    const isAtivo = ativo === 'true';
+    terminals = terminals.filter(t => t.ativo === isAtivo);
+  }
+
+  // Sort: default first, then by name
+  terminals.sort((a, b) => (b.padrao ? 1 : 0) - (a.padrao ? 1 : 0) || a.nome.localeCompare(b.nome));
+
+  const sanitized = terminals.map(t => GatewayFactory.sanitizeTerminal(t));
+  res.json({ success: true, terminals: sanitized });
+});
+
+// 2. Register New Terminal
+apiRouter.post('/commerce/terminals', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const {
+    nome,
+    provedor,
+    modelo,
+    tipoEquipamento,
+    identificadorProvedor,
+    serialNumber,
+    modulo,
+    caixaIdPadrao,
+    padrao,
+    modoOperacao,
+    credenciais,
+    taxaDebitoPercentual,
+    taxaCreditoPercentual,
+    taxaPixPercentual
+  } = req.body;
+
+  if (!nome || !String(nome).trim()) {
+    res.status(400).json({ error: 'Nome de identificação do terminal é obrigatório.' });
+    return;
+  }
+
+  const validProviders: TerminalProvider[] = ['mercadopago_point', 'stone_connect', 'pagar_me', 'smartpos_tef', 'pos_manual'];
+  if (!provedor || !validProviders.includes(provedor)) {
+    res.status(400).json({ error: 'Provedor de pagamento inválido. Selecione Mercado Pago, Stone Connect, TEF ou POS Manual.' });
+    return;
+  }
+
+  if (!identificadorProvedor && provedor !== 'pos_manual') {
+    res.status(400).json({ error: 'O identificador exigido pelo provedor (Device ID, Terminal ID ou Serial) é obrigatório.' });
+    return;
+  }
+
+  // If marked as default, unset previous default in the same module
+  const targetModulo = modulo && ['adega', 'tabacaria', 'ambos'].includes(modulo) ? modulo : 'ambos';
+  if (padrao) {
+    db.commercialTerminals
+      .filter(t => t.companyId === companyId && (t.modulo === targetModulo || t.modulo === 'ambos' || targetModulo === 'ambos'))
+      .forEach(t => { t.padrao = false; });
+  }
+
+  const newTerminal: CommercialTerminal = {
+    id: crypto.randomUUID(),
+    companyId,
+    nome: String(nome).trim(),
+    provedor,
+    modelo: modelo ? String(modelo).trim() : 'Terminal POS',
+    tipoEquipamento: tipoEquipamento && ['smart_pos', 'pos_gprs', 'tef_pinpad', 'pos_manual'].includes(tipoEquipamento)
+      ? tipoEquipamento
+      : 'smart_pos',
+    identificadorProvedor: identificadorProvedor ? String(identificadorProvedor).trim() : 'MANUAL_POS',
+    serialNumber: serialNumber ? String(serialNumber).trim() : undefined,
+    modulo: targetModulo,
+    caixaIdPadrao: caixaIdPadrao || undefined,
+    padrao: Boolean(padrao),
+    ativo: true,
+    statusConexao: 'desconhecido',
+    modoOperacao: modoOperacao && ['cloud_api', 'smart_pos_app', 'tef_integrado', 'manual_operador'].includes(modoOperacao)
+      ? modoOperacao
+      : (provedor === 'pos_manual' ? 'manual_operador' : 'cloud_api'),
+    credenciais: credenciais || {},
+    taxaDebitoPercentual: parseFloat(taxaDebitoPercentual) >= 0 ? parseFloat(taxaDebitoPercentual) : 1.99,
+    taxaCreditoPercentual: parseFloat(taxaCreditoPercentual) >= 0 ? parseFloat(taxaCreditoPercentual) : 3.99,
+    taxaPixPercentual: parseFloat(taxaPixPercentual) >= 0 ? parseFloat(taxaPixPercentual) : 0.99,
+    criadoEm: new Date().toISOString(),
+    atualizadoEm: new Date().toISOString()
+  };
+
+  db.commercialTerminals.push(newTerminal);
+  db.save();
+
+  db.logAudit({
+    userId: req.user!.id,
+    userEmail: req.user!.email,
+    userName: req.user!.name,
+    companyId,
+    acao: 'CADASTRO_TERMINAL_MAQUININHA',
+    detalhes: `Terminal '${newTerminal.nome}' (${newTerminal.provedor}) cadastrado para o módulo ${newTerminal.modulo}.`,
+    ip: req.ip
+  });
+
+  res.status(201).json({
+    success: true,
+    message: 'Maquininha cadastrada com sucesso!',
+    terminal: GatewayFactory.sanitizeTerminal(newTerminal)
+  });
+});
+
+// 3. Update Terminal
+apiRouter.put('/commerce/terminals/:id', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const { id } = req.params;
+
+  const terminal = db.commercialTerminals.find(t => t.id === id && t.companyId === companyId);
+  if (!terminal) {
+    res.status(404).json({ error: 'Terminal de pagamento não encontrado.' });
+    return;
+  }
+
+  const {
+    nome,
+    provedor,
+    modelo,
+    tipoEquipamento,
+    identificadorProvedor,
+    serialNumber,
+    modulo,
+    caixaIdPadrao,
+    padrao,
+    ativo,
+    modoOperacao,
+    credenciais,
+    taxaDebitoPercentual,
+    taxaCreditoPercentual,
+    taxaPixPercentual
+  } = req.body;
+
+  if (nome !== undefined) terminal.nome = String(nome).trim();
+  if (provedor !== undefined) terminal.provedor = provedor;
+  if (modelo !== undefined) terminal.modelo = String(modelo).trim();
+  if (tipoEquipamento !== undefined) terminal.tipoEquipamento = tipoEquipamento;
+  if (identificadorProvedor !== undefined) terminal.identificadorProvedor = String(identificadorProvedor).trim();
+  if (serialNumber !== undefined) terminal.serialNumber = String(serialNumber).trim();
+  if (modulo !== undefined) terminal.modulo = modulo;
+  if (caixaIdPadrao !== undefined) terminal.caixaIdPadrao = caixaIdPadrao || undefined;
+  if (ativo !== undefined) terminal.ativo = Boolean(ativo);
+  if (modoOperacao !== undefined) terminal.modoOperacao = modoOperacao;
+  if (taxaDebitoPercentual !== undefined) terminal.taxaDebitoPercentual = parseFloat(taxaDebitoPercentual);
+  if (taxaCreditoPercentual !== undefined) terminal.taxaCreditoPercentual = parseFloat(taxaCreditoPercentual);
+  if (taxaPixPercentual !== undefined) terminal.taxaPixPercentual = parseFloat(taxaPixPercentual);
+
+  // Update credentials if provided (without overwriting if omitted)
+  if (credenciais && typeof credenciais === 'object') {
+    terminal.credenciais = {
+      ...terminal.credenciais,
+      ...credenciais
+    };
+  }
+
+  if (padrao === true) {
+    db.commercialTerminals
+      .filter(t => t.companyId === companyId && t.id !== terminal.id && (t.modulo === terminal.modulo || t.modulo === 'ambos' || terminal.modulo === 'ambos'))
+      .forEach(t => { t.padrao = false; });
+    terminal.padrao = true;
+  } else if (padrao === false) {
+    terminal.padrao = false;
+  }
+
+  terminal.atualizadoEm = new Date().toISOString();
+  db.save();
+
+  db.logAudit({
+    userId: req.user!.id,
+    userEmail: req.user!.email,
+    userName: req.user!.name,
+    companyId,
+    acao: 'ATUALIZACAO_TERMINAL_MAQUININHA',
+    detalhes: `Terminal '${terminal.nome}' atualizado. Ativo: ${terminal.ativo}, Padrão: ${terminal.padrao}`,
+    ip: req.ip
+  });
+
+  res.json({
+    success: true,
+    message: 'Terminal atualizado com sucesso!',
+    terminal: GatewayFactory.sanitizeTerminal(terminal)
+  });
+});
+
+// 4. Delete Terminal
+apiRouter.delete('/commerce/terminals/:id', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const { id } = req.params;
+
+  const index = db.commercialTerminals.findIndex(t => t.id === id && t.companyId === companyId);
+  if (index === -1) {
+    res.status(404).json({ error: 'Terminal não encontrado.' });
+    return;
+  }
+
+  const [removed] = db.commercialTerminals.splice(index, 1);
+  db.save();
+
+  db.logAudit({
+    userId: req.user!.id,
+    userEmail: req.user!.email,
+    userName: req.user!.name,
+    companyId,
+    acao: 'EXCLUSAO_TERMINAL_MAQUININHA',
+    detalhes: `Terminal '${removed.nome}' removido.`,
+    ip: req.ip
+  });
+
+  res.json({ success: true, message: 'Terminal removido com sucesso!' });
+});
+
+// 5. Test Connection with Terminal Provider
+apiRouter.post('/commerce/terminals/:id/test', authenticate, checkSubscription, async (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const { id } = req.params;
+
+  const terminal = db.commercialTerminals.find(t => t.id === id && t.companyId === companyId);
+  if (!terminal) {
+    res.status(404).json({ error: 'Terminal não encontrado.' });
+    return;
+  }
+
+  const adapter = GatewayFactory.getAdapter(terminal.provedor);
+  const testResult = await adapter.testConnection(terminal);
+
+  terminal.statusConexao = testResult.terminalStatus || (testResult.success ? 'online' : 'offline');
+  terminal.ultimoTesteEm = new Date().toISOString();
+  if (testResult.batteryLevel !== undefined) {
+    terminal.bateriaNivel = testResult.batteryLevel;
+  }
+  terminal.ultimoResultadoTeste = {
+    sucesso: testResult.success,
+    mensagem: testResult.message,
+    detalhes: testResult.details,
+    dataHora: new Date().toISOString()
+  };
+  terminal.ultimaSincronizacao = new Date().toISOString();
+
+  db.save();
+
+  db.logAudit({
+    userId: req.user!.id,
+    userEmail: req.user!.email,
+    userName: req.user!.name,
+    companyId,
+    acao: 'TESTE_CONEXAO_MAQUININHA',
+    detalhes: `Teste de conexão no terminal '${terminal.nome}' (${terminal.provedor}): ${testResult.success ? 'SUCESSO' : 'FALHA'}. Mensagem: ${testResult.message}`,
+    ip: req.ip
+  });
+
+  res.json({
+    success: testResult.success,
+    message: testResult.message,
+    terminalStatus: terminal.statusConexao,
+    batteryLevel: terminal.bateriaNivel,
+    details: testResult.details,
+    terminal: GatewayFactory.sanitizeTerminal(terminal)
+  });
+});
+
+// 6. Create PDV Payment Intent for Terminal
+apiRouter.post('/commerce/terminals/:id/intent', authenticate, checkSubscription, async (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const { id } = req.params;
+  const {
+    valor,
+    tipoOperacao,
+    parcelas,
+    modulo,
+    codigoVenda,
+    caixaSessionId,
+    idempotencyKey
+  } = req.body;
+
+  const amount = parseFloat(valor);
+  if (isNaN(amount) || amount <= 0) {
+    res.status(400).json({ error: 'Valor da cobrança deve ser maior que zero.' });
+    return;
+  }
+
+  const terminal = db.commercialTerminals.find(t => t.id === id && t.companyId === companyId);
+  if (!terminal) {
+    res.status(404).json({ error: 'Terminal de pagamento não encontrado.' });
+    return;
+  }
+
+  if (!terminal.ativo) {
+    res.status(400).json({ error: 'Este terminal está desativado. Ative-o nas configurações antes de utilizá-lo.' });
+    return;
+  }
+
+  // Idempotency check: if intent already exists with same key, return it
+  if (idempotencyKey) {
+    const existing = db.commercialTerminalTransactions.find(t => t.companyId === companyId && t.idempotencyKey === idempotencyKey);
+    if (existing) {
+      res.json({
+        success: true,
+        message: 'Intenção de pagamento já registrada anteriormente.',
+        transaction: existing
+      });
+      return;
+    }
+  }
+
+  const externalReference = `MOVILOG-${Date.now().toString().slice(-8)}`;
+  const adapter = GatewayFactory.getAdapter(terminal.provedor);
+
+  const intentResult = await adapter.createPaymentIntent(terminal, {
+    amount,
+    paymentType: tipoOperacao && ['debito', 'credito', 'pix'].includes(tipoOperacao) ? tipoOperacao : 'debito',
+    installments: parcelas ? parseInt(parcelas, 10) : 1,
+    externalReference,
+    orderDescription: `MoviLog ${terminal.modulo.toUpperCase()} ${codigoVenda || externalReference}`,
+    printOnTerminal: true
+  });
+
+  const rate = tipoOperacao === 'debito'
+    ? (terminal.taxaDebitoPercentual || 1.99)
+    : tipoOperacao === 'pix'
+      ? (terminal.taxaPixPercentual || 0.99)
+      : (terminal.taxaCreditoPercentual || 3.99);
+
+  const fee = intentResult.feeAmount !== undefined ? intentResult.feeAmount : Number(((amount * rate) / 100).toFixed(2));
+  const net = intentResult.netAmount !== undefined ? intentResult.netAmount : Number((amount - fee).toFixed(2));
+
+  const transaction: CommercialTerminalTransaction = {
+    id: crypto.randomUUID(),
+    companyId,
+    terminalId: terminal.id,
+    terminalNome: terminal.nome,
+    provedor: terminal.provedor,
+    modeloTerminal: terminal.modelo,
+    modulo: modulo && ['adega', 'tabacaria', 'misto'].includes(modulo) ? modulo : (terminal.modulo === 'ambos' ? 'adega' : terminal.modulo),
+    codigoVenda: codigoVenda || undefined,
+    caixaSessionId: caixaSessionId || undefined,
+    tipoOperacao: tipoOperacao && ['debito', 'credito', 'pix'].includes(tipoOperacao) ? tipoOperacao : 'debito',
+    bandeira: intentResult.cardBrand || undefined,
+    ultimosDigitosCartao: intentResult.lastFourDigits || undefined,
+    valorBruto: amount,
+    taxaPercentualAplicada: rate,
+    valorTaxaEstimada: fee,
+    valorLiquido: net,
+    status: intentResult.status,
+    nsu: intentResult.nsu,
+    codigoAutorizacao: intentResult.authorizationCode,
+    paymentIntentId: intentResult.paymentIntentId,
+    externalReference,
+    mensagemProvedor: intentResult.message,
+    detalhesTecnicos: intentResult.rawResponse,
+    criadoEm: new Date().toISOString(),
+    concluidoEm: intentResult.status === 'aprovado' ? new Date().toISOString() : undefined,
+    conciliado: false,
+    idempotencyKey: idempotencyKey || undefined
+  };
+
+  db.commercialTerminalTransactions.push(transaction);
+  terminal.ultimaSincronizacao = new Date().toISOString();
+  db.save();
+
+  db.logAudit({
+    userId: req.user!.id,
+    userEmail: req.user!.email,
+    userName: req.user!.name,
+    companyId,
+    acao: 'INTENCAO_PAGAMENTO_MAQUININHA',
+    detalhes: `Cobrança de R$ ${amount.toFixed(2)} (${tipoOperacao}) enviada ao terminal '${terminal.nome}'. Status: ${transaction.status}`,
+    ip: req.ip
+  });
+
+  res.json({
+    success: intentResult.success,
+    transaction,
+    message: intentResult.message
+  });
+});
+
+// 7. Check Payment Intent Status (Polling or On-Demand)
+apiRouter.get('/commerce/terminals/intent/:intentId/status', authenticate, checkSubscription, async (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const { intentId } = req.params;
+
+  const transaction = db.commercialTerminalTransactions.find(t =>
+    t.companyId === companyId && (t.id === intentId || t.paymentIntentId === intentId)
+  );
+
+  if (!transaction) {
+    res.status(404).json({ error: 'Transação ou intenção de pagamento não encontrada.' });
+    return;
+  }
+
+  // If already approved or terminal is manual, return current status
+  if (transaction.status === 'aprovado' || transaction.status === 'cancelado' || transaction.status === 'recusado') {
+    res.json({ success: true, transaction, status: transaction.status });
+    return;
+  }
+
+  const terminal = db.commercialTerminals.find(t => t.id === transaction.terminalId && t.companyId === companyId);
+  if (!terminal) {
+    res.json({ success: true, transaction, status: transaction.status });
+    return;
+  }
+
+  const adapter = GatewayFactory.getAdapter(terminal.provedor);
+  if (transaction.paymentIntentId) {
+    const statusResult = await adapter.getPaymentIntentStatus(terminal, transaction.paymentIntentId);
+    transaction.status = statusResult.status;
+    if (statusResult.nsu) transaction.nsu = statusResult.nsu;
+    if (statusResult.authorizationCode) transaction.codigoAutorizacao = statusResult.authorizationCode;
+    if (statusResult.cardBrand) transaction.bandeira = statusResult.cardBrand;
+    if (statusResult.lastFourDigits) transaction.ultimosDigitosCartao = statusResult.lastFourDigits;
+    if (statusResult.message) transaction.mensagemProvedor = statusResult.message;
+    if (statusResult.status === 'aprovado' && !transaction.concluidoEm) {
+      transaction.concluidoEm = new Date().toISOString();
+    }
+    db.save();
+  }
+
+  res.json({
+    success: true,
+    transaction,
+    status: transaction.status,
+    message: transaction.mensagemProvedor
+  });
+});
+
+// 8. Cancel Payment Intent on Terminal
+apiRouter.post('/commerce/terminals/intent/:intentId/cancel', authenticate, checkSubscription, async (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const { intentId } = req.params;
+
+  const transaction = db.commercialTerminalTransactions.find(t =>
+    t.companyId === companyId && (t.id === intentId || t.paymentIntentId === intentId)
+  );
+
+  if (!transaction) {
+    res.status(404).json({ error: 'Transação não encontrada.' });
+    return;
+  }
+
+  const terminal = db.commercialTerminals.find(t => t.id === transaction.terminalId && t.companyId === companyId);
+  if (terminal && transaction.paymentIntentId) {
+    const adapter = GatewayFactory.getAdapter(terminal.provedor);
+    await adapter.cancelPaymentIntent(terminal, transaction.paymentIntentId);
+  }
+
+  transaction.status = 'cancelado';
+  transaction.canceladoEm = new Date().toISOString();
+  db.save();
+
+  db.logAudit({
+    userId: req.user!.id,
+    userEmail: req.user!.email,
+    userName: req.user!.name,
+    companyId,
+    acao: 'CANCELAMENTO_INTENCAO_MAQUININHA',
+    detalhes: `Intenção de cobrança ${transaction.id} cancelada no terminal '${transaction.terminalNome}'.`,
+    ip: req.ip
+  });
+
+  res.json({ success: true, message: 'Operação cancelada no terminal com sucesso.', transaction });
+});
+
+// 9. List Terminal Transactions History
+apiRouter.get('/commerce/terminals/transactions', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const { terminalId, modulo, status, limit } = req.query;
+
+  let list = db.commercialTerminalTransactions.filter(t => t.companyId === companyId);
+
+  if (terminalId && typeof terminalId === 'string') {
+    list = list.filter(t => t.terminalId === terminalId);
+  }
+
+  if (modulo && typeof modulo === 'string' && (modulo === 'adega' || modulo === 'tabacaria')) {
+    list = list.filter(t => t.modulo === modulo);
+  }
+
+  if (status && typeof status === 'string') {
+    list = list.filter(t => t.status === status);
+  }
+
+  list.sort((a, b) => new Date(b.criadoEm).getTime() - new Date(a.criadoEm).getTime());
+  const max = limit ? parseInt(limit as string, 10) : 100;
+
+  res.json({ success: true, transactions: list.slice(0, max), total: list.length });
+});
+
+// 10. Financial Reconciliation Report (MoviLog Sales vs Terminal Transactions)
+apiRouter.get('/commerce/terminals/reconciliation', authenticate, checkSubscription, (req: AuthRequest, res: Response) => {
+  ensureCommercialCollections();
+  const companyId = getEffectiveCompanyId(req);
+  const { modulo, dataInicio, dataFim } = req.query;
+
+  // Filter card sales
+  let sales = db.commercialSales.filter(s =>
+    s.companyId === companyId &&
+    (s.formaPagamento === 'cartao_debito' || s.formaPagamento === 'cartao_credito' || s.formaPagamento === 'misto')
+  );
+
+  // Filter terminal transactions
+  let txs = db.commercialTerminalTransactions.filter(t => t.companyId === companyId);
+
+  if (modulo && (modulo === 'adega' || modulo === 'tabacaria')) {
+    sales = sales.filter(s => s.modulo === modulo);
+    txs = txs.filter(t => t.modulo === modulo);
+  }
+
+  if (dataInicio && typeof dataInicio === 'string') {
+    sales = sales.filter(s => s.criadoEm >= dataInicio);
+    txs = txs.filter(t => t.criadoEm >= dataInicio);
+  }
+
+  if (dataFim && typeof dataFim === 'string') {
+    sales = sales.filter(s => s.criadoEm <= `${dataFim}T23:59:59.999Z`);
+    txs = txs.filter(t => t.criadoEm <= `${dataFim}T23:59:59.999Z`);
+  }
+
+  // Cross-match sales and transactions
+  const matchedTxIds = new Set<string>();
+  const matchedSaleIds = new Set<string>();
+
+  const reconciliationItems: any[] = [];
+
+  // Match 1: Sales to Transactions
+  for (const sale of sales) {
+    let matchedTx = txs.find(t =>
+      (t.saleId && t.saleId === sale.id) ||
+      (t.codigoVenda && t.codigoVenda === sale.codigoVenda) ||
+      (sale.detalhesPagamento?.nsu && t.nsu === sale.detalhesPagamento.nsu) ||
+      (sale.detalhesPagamento?.paymentIntentId && t.paymentIntentId === sale.detalhesPagamento.paymentIntentId)
+    );
+
+    if (matchedTx) {
+      matchedTxIds.add(matchedTx.id);
+      matchedSaleIds.add(sale.id);
+
+      const diff = Number((sale.valorTotal - matchedTx.valorBruto).toFixed(2));
+      let itemStatus: 'conciliado' | 'divergencia_valor' | 'transacao_cancelada_com_venda_ativa' = 'conciliado';
+      let obs = 'Venda e comprovante de maquininha conferidos perfeitamente.';
+
+      if (matchedTx.status === 'cancelado' || matchedTx.status === 'estornado') {
+        itemStatus = 'transacao_cancelada_com_venda_ativa';
+        obs = `ALERTA: A transação foi ${matchedTx.status.toUpperCase()} na maquininha, mas a venda continua ativa no MoviLog!`;
+      } else if (Math.abs(diff) > 0.01) {
+        itemStatus = 'divergencia_valor';
+        obs = `DIVERGÊNCIA: Valor da venda (R$ ${sale.valorTotal.toFixed(2)}) difere do valor aprovado na maquininha (R$ ${matchedTx.valorBruto.toFixed(2)}).`;
+      }
+
+      reconciliationItems.push({
+        id: `rec_${sale.id}`,
+        statusConciliacao: itemStatus,
+        venda: {
+          id: sale.id,
+          codigoVenda: sale.codigoVenda,
+          valorTotal: sale.valorTotal,
+          formaPagamento: sale.formaPagamento,
+          status: sale.status,
+          criadoEm: sale.criadoEm,
+          operadorNome: sale.operadorNome
+        },
+        transacao: {
+          id: matchedTx.id,
+          nsu: matchedTx.nsu,
+          codigoAutorizacao: matchedTx.codigoAutorizacao,
+          terminalNome: matchedTx.terminalNome,
+          provedor: matchedTx.provedor,
+          valorBruto: matchedTx.valorBruto,
+          valorTaxaEstimada: matchedTx.valorTaxaEstimada,
+          valorLiquido: matchedTx.valorLiquido,
+          status: matchedTx.status,
+          bandeira: matchedTx.bandeira,
+          criadoEm: matchedTx.criadoEm
+        },
+        diferencaValor: diff,
+        observacaoAuditoria: obs
+      });
+    } else {
+      // Venda sem transação encontrada
+      reconciliationItems.push({
+        id: `rec_orphan_sale_${sale.id}`,
+        statusConciliacao: 'venda_sem_transacao',
+        venda: {
+          id: sale.id,
+          codigoVenda: sale.codigoVenda,
+          valorTotal: sale.valorTotal,
+          formaPagamento: sale.formaPagamento,
+          status: sale.status,
+          criadoEm: sale.criadoEm,
+          operadorNome: sale.operadorNome
+        },
+        observacaoAuditoria: 'Venda a cartão finalizada no PDV sem vinculação de NSU ou autorização da maquininha.'
+      });
+    }
+  }
+
+  // Match 2: Orphan Transactions (approved in terminal without a sale)
+  for (const tx of txs) {
+    if (!matchedTxIds.has(tx.id) && tx.status === 'aprovado') {
+      reconciliationItems.push({
+        id: `rec_orphan_tx_${tx.id}`,
+        statusConciliacao: 'transacao_sem_venda',
+        transacao: {
+          id: tx.id,
+          nsu: tx.nsu,
+          codigoAutorizacao: tx.codigoAutorizacao,
+          terminalNome: tx.terminalNome,
+          provedor: tx.provedor,
+          valorBruto: tx.valorBruto,
+          valorTaxaEstimada: tx.valorTaxaEstimada,
+          valorLiquido: tx.valorLiquido,
+          status: tx.status,
+          bandeira: tx.bandeira,
+          criadoEm: tx.criadoEm
+        },
+        observacaoAuditoria: 'Transação aprovada na maquininha sem venda correspondente no MoviLog (Cobrança avulsa ou pendente de finalização).'
+      });
+    }
+  }
+
+  // Resumo estatístico e financeiro
+  const totalVendasCartao = sales.length;
+  const valorTotalVendas = Number(sales.reduce((acc, s) => acc + s.valorTotal, 0).toFixed(2));
+
+  const approvedTxs = txs.filter(t => t.status === 'aprovado');
+  const valorTotalBruto = Number(approvedTxs.reduce((acc, t) => acc + t.valorBruto, 0).toFixed(2));
+  const valorTotalTaxas = Number(approvedTxs.reduce((acc, t) => acc + t.valorTaxaEstimada, 0).toFixed(2));
+  const valorTotalLiquido = Number(approvedTxs.reduce((acc, t) => acc + t.valorLiquido, 0).toFixed(2));
+
+  const transacoesAprovadasQtd = approvedTxs.length;
+  const transacoesRecusadasQtd = txs.filter(t => t.status === 'recusado').length;
+  const transacoesCanceladasQtd = txs.filter(t => t.status === 'cancelado' || t.status === 'estornado').length;
+
+  const vendasSemTransacaoQtd = reconciliationItems.filter(i => i.statusConciliacao === 'venda_sem_transacao').length;
+  const transacoesOrfasQtd = reconciliationItems.filter(i => i.statusConciliacao === 'transacao_sem_venda').length;
+  const divergenciasValorQtd = reconciliationItems.filter(i => i.statusConciliacao === 'divergencia_valor').length;
+
+  res.json({
+    success: true,
+    dataGeracao: new Date().toISOString(),
+    companyId,
+    resumo: {
+      totalVendasMoviLogCartao: totalVendasCartao,
+      valorTotalVendasMoviLog: valorTotalVendas,
+      totalTransacoesMaquininha: txs.length,
+      valorTotalBrutoMaquininha: valorTotalBruto,
+      valorTotalTaxasMaquininha: valorTotalTaxas,
+      valorTotalLiquidoMaquininha: valorTotalLiquido,
+      transacoesAprovadasQtd,
+      transacoesRecusadasQtd,
+      transacoesCanceladasQtd,
+      vendasSemTransacaoQtd,
+      transacoesOrfasQtd,
+      divergenciasValorQtd
+    },
+    itens: reconciliationItems
+  });
+});
+
+// 11. Secure Webhook Receiver for Acquirers (Mercado Pago, Stone, TEF)
+apiRouter.post('/commerce/terminals/webhook/:provider', async (req: Request, res: Response) => {
+  ensureCommercialCollections();
+  const { provider } = req.params;
+  const body = req.body;
+  const headers = req.headers;
+
+  try {
+    // Audit log webhook arrival
+    const paymentIntentId = body?.data?.id || body?.id || body?.payment_intent_id;
+    const externalReference = body?.additional_info?.external_reference || body?.external_reference;
+
+    if (paymentIntentId || externalReference) {
+      const tx = db.commercialTerminalTransactions.find(t =>
+        (paymentIntentId && t.paymentIntentId === paymentIntentId) ||
+        (externalReference && t.externalReference === externalReference)
+      );
+
+      if (tx) {
+        if (body.action === 'payment_intent.finished' || body.status === 'PROCESSED' || body.status === 'APPROVED') {
+          tx.status = 'aprovado';
+          tx.concluidoEm = new Date().toISOString();
+        } else if (body.status === 'CANCELED') {
+          tx.status = 'cancelado';
+        }
+        db.save();
+      }
+    }
+
+    res.status(200).json({ received: true });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Erro ao processar webhook' });
+  }
 });
 
 

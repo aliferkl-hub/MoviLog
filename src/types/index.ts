@@ -554,6 +554,7 @@ export interface CommercialProduct {
   codigoBarras?: string;
   nome: string;
   categoria: string;
+  classificacaoLegal?: 'sem_restricao' | 'bebida_alcoolica' | 'tabaco_derivados' | 'outro_restrito';
   descricao?: string;
   marca?: string;
   fornecedorId?: string;
@@ -625,6 +626,24 @@ export interface CommercialSale {
   criadoEm: string;
   canceladoEm?: string;
   canceladoPor?: string;
+  detalhesPagamento?: {
+    forma?: 'dinheiro' | 'pix' | 'cartao_credito' | 'cartao_debito' | 'misto';
+    valorRecebido?: number;
+    troco?: number;
+    pixTxid?: string;
+    pixCopiaECola?: string;
+    pixConfirmadoEm?: string;
+    pixProvedor?: string;
+    metodoConfirmacao?: string;
+    cartaoBandeira?: string;
+    cartaoAutorizacao?: string;
+    confirmacaoManual?: boolean;
+    comprovanteReferencia?: string;
+    nsu?: string;
+    txid?: string;
+    [key: string]: any;
+  };
+  idempotencyKey?: string;
 }
 
 export interface CashMovement {
@@ -652,12 +671,41 @@ export interface CommercialCashSession {
   totalVendasDinheiro: number;
   totalVendasPix: number;
   totalVendasCartao: number;
+  totalVendasCartaoDebito?: number;
+  totalVendasCartaoCredito?: number;
+  totalCancelamentosDinheiro?: number;
   totalVendasOutros: number;
   saldoEsperadoDinheiro: number;
   saldoContadoDinheiro?: number;
   diferenca?: number;
   observacoesFechamento?: string;
+  fechadoPorId?: string;
+  fechadoPorNome?: string;
   movimentacoesManuais: CashMovement[];
+}
+
+export interface PixCharge {
+  id: string;
+  companyId: string;
+  modulo: 'adega' | 'tabacaria' | 'misto';
+  txid: string;
+  valor: number;
+  chavePix: string;
+  beneficiario: string;
+  cidade: string;
+  copiaECola: string;
+  qrCodeDataUrl: string;
+  qrCodePayload?: string;
+  endToEndId?: string;
+  status: 'aguardando_pagamento' | 'pago' | 'expirado' | 'cancelado' | 'falhou';
+  provedor: 'bacen_estatico' | 'mercadopago' | 'efi' | 'manual';
+  criadoEm: string;
+  expiraEm: string;
+  confirmadoEm?: string;
+  confirmadoPor?: string;
+  metodoConfirmacao?: 'webhook_provedor' | 'conferencia_manual_operador' | 'consulta_api';
+  comprovanteReferencia?: string;
+  idempotencyKey?: string;
 }
 
 export interface CommercialSupplier {
@@ -721,4 +769,156 @@ export interface CommercialDashboardMetrics {
     adega: { totalProdutos: number; totalEstoqueValor: number; vendasMesValor: number };
     tabacaria: { totalProdutos: number; totalEstoqueValor: number; vendasMesValor: number };
   };
+}
+
+// ==========================================
+// CENTRAL DE INTEGRAÇÃO DE MAQUININHAS (POS / TEF)
+// ==========================================
+
+export type TerminalProvider = 'mercadopago_point' | 'stone_connect' | 'pagar_me' | 'smartpos_tef' | 'pos_manual';
+
+export interface CommercialTerminalCredentials {
+  // Mercado Pago Point Cloud API
+  mpAccessToken?: string;
+  mpPublicKey?: string;
+  // Stone Connect / Pagar.me
+  stonePartnerKey?: string;
+  stoneSecretKey?: string;
+  stoneMerchantId?: string;
+  // TEF / SmartPOS Web Integrator
+  tefHost?: string;
+  tefPort?: number;
+  tefApiKey?: string;
+  // Webhook Signature Key
+  webhookSecret?: string;
+}
+
+export interface CommercialTerminal {
+  id: string;
+  companyId: string;
+  nome: string;
+  provedor: TerminalProvider;
+  modelo: string;
+  tipoEquipamento: 'smart_pos' | 'pos_gprs' | 'tef_pinpad' | 'pos_manual';
+  identificadorProvedor: string; // device_id no MP, serial na Stone ou código terminal TEF
+  serialNumber?: string;
+  modulo: 'adega' | 'tabacaria' | 'ambos';
+  caixaIdPadrao?: string;
+  padrao: boolean;
+  ativo: boolean;
+  statusConexao: 'online' | 'offline' | 'desconhecido';
+  ultimaSincronizacao?: string;
+  bateriaNivel?: number;
+  modoOperacao: 'cloud_api' | 'smart_pos_app' | 'tef_integrado' | 'manual_operador';
+  // Credenciais (mascaradas nas respostas para o frontend)
+  credenciais?: CommercialTerminalCredentials;
+  hasCredentials?: boolean;
+  maskedToken?: string;
+  taxaDebitoPercentual?: number;
+  taxaCreditoPercentual?: number;
+  taxaPixPercentual?: number;
+  criadoEm: string;
+  atualizadoEm: string;
+  ultimoTesteEm?: string;
+  ultimoResultadoTeste?: {
+    sucesso: boolean;
+    mensagem: string;
+    detalhes?: any;
+    dataHora: string;
+  };
+}
+
+export type TerminalTransactionStatus = 'pendente' | 'processando' | 'aprovado' | 'recusado' | 'cancelado' | 'estornado' | 'falha_comunicacao';
+
+export interface CommercialTerminalTransaction {
+  id: string;
+  companyId: string;
+  terminalId: string;
+  terminalNome: string;
+  provedor: TerminalProvider;
+  modeloTerminal?: string;
+  modulo: 'adega' | 'tabacaria' | 'misto';
+  saleId?: string;
+  codigoVenda?: string;
+  caixaSessionId?: string;
+  tipoOperacao: 'debito' | 'credito' | 'pix';
+  bandeira?: string;
+  ultimosDigitosCartao?: string;
+  valorBruto: number;
+  taxaPercentualAplicada: number;
+  valorTaxaEstimada: number;
+  valorLiquido: number;
+  status: TerminalTransactionStatus;
+  nsu?: string;
+  codigoAutorizacao?: string;
+  paymentIntentId?: string;
+  externalReference?: string;
+  mensagemProvedor?: string;
+  detalhesTecnicos?: any;
+  criadoEm: string;
+  concluidoEm?: string;
+  canceladoEm?: string;
+  estornadoEm?: string;
+  conciliado: boolean;
+  conciliadoEm?: string;
+  divergenciaConciliacao?: string;
+  idempotencyKey?: string;
+}
+
+export interface TerminalPaymentIntentRequest {
+  terminalId: string;
+  valor: number;
+  tipoOperacao: 'debito' | 'credito' | 'pix';
+  parcelas?: number;
+  modulo: 'adega' | 'tabacaria' | 'misto';
+  codigoVenda?: string;
+  caixaSessionId?: string;
+  idempotencyKey?: string;
+}
+
+export interface TerminalReconciliationReport {
+  dataGeracao: string;
+  companyId: string;
+  resumo: {
+    totalVendasMoviLogCartao: number;
+    valorTotalVendasMoviLog: number;
+    totalTransacoesMaquininha: number;
+    valorTotalBrutoMaquininha: number;
+    valorTotalTaxasMaquininha: number;
+    valorTotalLiquidoMaquininha: number;
+    transacoesAprovadasQtd: number;
+    transacoesRecusadasQtd: number;
+    transacoesCanceladasQtd: number;
+    vendasSemTransacaoQtd: number;
+    transacoesOrfasQtd: number;
+    divergenciasValorQtd: number;
+  };
+  itens: {
+    id: string;
+    statusConciliacao: 'conciliado' | 'venda_sem_transacao' | 'transacao_sem_venda' | 'divergencia_valor' | 'transacao_cancelada_com_venda_ativa';
+    venda?: {
+      id: string;
+      codigoVenda: string;
+      valorTotal: number;
+      formaPagamento: string;
+      status: string;
+      criadoEm: string;
+      operadorNome: string;
+    };
+    transacao?: {
+      id: string;
+      nsu?: string;
+      codigoAutorizacao?: string;
+      terminalNome: string;
+      provedor: string;
+      valorBruto: number;
+      valorTaxaEstimada: number;
+      valorLiquido: number;
+      status: string;
+      bandeira?: string;
+      criadoEm: string;
+    };
+    diferencaValor?: number;
+    observacaoAuditoria?: string;
+  }[];
 }

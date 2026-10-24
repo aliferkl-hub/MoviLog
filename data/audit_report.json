@@ -12,7 +12,7 @@
     "fase": "FASE 2",
     "teste": "Cadastro manual de entrega com campos completos",
     "resultado": "aprovado",
-    "evidencia": "Código LL-7106039 gerado com status 201 e geocodificação (-23.5678596, -46.6508179)",
+    "evidencia": "Código LL-1602051 gerado com status 201 e geocodificação (-23.5678596, -46.6508179)",
     "arquivoOuEndpoint": "POST /api/deliveries"
   },
   {
@@ -28,7 +28,7 @@
     "fase": "FASE 2",
     "teste": "Detecção e bloqueio de cadastro duplicado",
     "resultado": "aprovado",
-    "evidencia": "Resposta HTTP 409 com mensagem: \"Possível duplicidade identificada: já existe a entrega LL-7106039 com mesmo destinatário e endereço nesta empresa.\"",
+    "evidencia": "Resposta HTTP 409 com mensagem: \"Possível duplicidade identificada: já existe a entrega LL-1602051 com mesmo destinatário e endereço nesta empresa.\"",
     "arquivoOuEndpoint": "POST /api/deliveries"
   },
   {
@@ -53,7 +53,7 @@
     "fase": "FASE 3",
     "teste": "Agrupamento e roteirização Nearest-Neighbor com alerta de dados sem coordenadas",
     "resultado": "aprovado",
-    "evidencia": "Retornadas 3 paradas sugeridas. Distância calculada: 2.4 km. Aviso emitido: \"1 entrega(s) possuem endereço sem coordenadas geográficas confirmadas. Foram agrupadas por CEP e bairro sem coordenadas inventadas.\"",
+    "evidencia": "Retornadas 3 paradas sugeridas. Distância calculada: 2.3 km. Aviso emitido: \"1 entrega(s) possuem endereço sem coordenadas geográficas confirmadas. Foram agrupadas por CEP e bairro sem coordenadas inventadas.\"",
     "arquivoOuEndpoint": "POST /api/routes/plan-suggest",
     "correcaoRealizada": "Implementado agrupamento explícito por CEP/bairro para entregas sem coordenadas geográficas confirmadas"
   },
@@ -70,7 +70,7 @@
     "fase": "FASE 3",
     "teste": "Rota criada em preparação e impedida de execução sem publicação expressa",
     "resultado": "aprovado",
-    "evidencia": "Rota ROT-2026-013 criada com status 'em_preparacao', totalParadas=2, versao=1",
+    "evidencia": "Rota ROT-2026-016 criada com status 'em_preparacao', totalParadas=2, versao=1",
     "arquivoOuEndpoint": "POST /api/routes"
   },
   {
@@ -95,7 +95,7 @@
     "fase": "FASE 3",
     "teste": "Publicação oficial da rota pelo roteirista/administrador",
     "resultado": "aprovado",
-    "evidencia": "Rota ROT-2026-013 atualizada para status 'publicada', versao=3",
+    "evidencia": "Rota ROT-2026-016 atualizada para status 'publicada', versao=3",
     "arquivoOuEndpoint": "POST /api/routes/:id/publish"
   },
   {
@@ -103,7 +103,7 @@
     "fase": "FASE 4",
     "teste": "Entregador visualiza exclusivamente a rota atribuída e paradas publicadas",
     "resultado": "aprovado",
-    "evidencia": "Motorista Carlos Motorista Audit 1792823546204 recebeu a rota ROT-2026-013 com 2 paradas",
+    "evidencia": "Motorista Carlos Motorista Audit 1792826740848 recebeu a rota ROT-2026-016 com 2 paradas",
     "arquivoOuEndpoint": "GET /api/driver/active-route"
   },
   {
@@ -111,7 +111,7 @@
     "fase": "FASE 4",
     "teste": "Geração de rota e integração para aplicativo de navegação externa (Google Maps/Waze)",
     "resultado": "aprovado",
-    "evidencia": "URL de navegação gerada: https://www.google.com/maps/dir/?api=1&destination=-23.5517742,-46.6549543",
+    "evidencia": "URL de navegação gerada: https://www.google.com/maps/dir/?api=1&destination=-23.5527377,-46.6560256",
     "arquivoOuEndpoint": "src/components/routing/DriverPanelView.tsx"
   },
   {
@@ -119,7 +119,7 @@
     "fase": "FASE 4",
     "teste": "Início oficial do deslocamento da rota pelo entregador",
     "resultado": "aprovado",
-    "evidencia": "Rota alterada para 'em_andamento' com iniciadaEm=2026-10-24T06:32:28.186Z",
+    "evidencia": "Rota alterada para 'em_andamento' com iniciadaEm=2026-10-24T07:25:42.501Z",
     "arquivoOuEndpoint": "POST /api/routes/:id/start"
   },
   {
@@ -127,7 +127,7 @@
     "fase": "FASE 4",
     "teste": "Registro de entrega concluída com comprovante e documento do recebedor",
     "resultado": "aprovado",
-    "evidencia": "Parada marcada como 'entregue' às 2026-10-24T06:32:28.191Z. Recebedor: Dr. Roberto Santos",
+    "evidencia": "Parada marcada como 'entregue' às 2026-10-24T07:25:42.509Z. Recebedor: Dr. Roberto Santos",
     "arquivoOuEndpoint": "POST /api/routes/:id/stops/:stopIndex/status"
   },
   {
@@ -152,7 +152,7 @@
     "fase": "FASE 5",
     "teste": "Transmissão e registro de telemetria GPS com metadados de origem e tempo",
     "resultado": "aprovado",
-    "evidencia": "Lat/Lng (-23.5615, -46.656), Vel: 42km/h, timestampDispositivo=\"2026-10-24T06:32:28.301Z\", recebidoEm=\"2026-10-24T06:32:28.302Z\"",
+    "evidencia": "Lat/Lng (-23.5615, -46.656), Vel: 42km/h, timestampDispositivo=\"2026-10-24T07:25:42.664Z\", recebidoEm=\"2026-10-24T07:25:42.665Z\"",
     "arquivoOuEndpoint": "POST /api/fleet/vehicles/:id/location"
   },
   {
@@ -186,7 +186,7 @@
     "fase": "FASE 5",
     "teste": "Detecção de anomalia física de deslocamento / salto de coordenadas (anti-teletransporte)",
     "resultado": "aprovado",
-    "evidencia": "HTTP 400 retornado: \"Anomalia de telemetria detectada: velocidade implícita de 163462500 km/h excede o limite operacional seguro (possível coordenada adulterada ou salto de sinal GPS).\"",
+    "evidencia": "HTTP 400 retornado: \"Anomalia de telemetria detectada: velocidade implícita de 145300000 km/h excede o limite operacional seguro (possível coordenada adulterada ou salto de sinal GPS).\"",
     "arquivoOuEndpoint": "POST /api/fleet/vehicles/:id/location",
     "correcaoRealizada": "Adicionado cálculo de velocidade implícita via fórmula de Haversine bloqueando deslocamentos impossíveis (>300 km/h)"
   },
@@ -203,7 +203,7 @@
     "fase": "FASE 6",
     "teste": "Gravação síncrona e integridade das entidades no armazenamento persistente (db.json)",
     "resultado": "aprovado",
-    "evidencia": "Entrega LL-7106039, Rota ROT-2026-013 (status='concluida') e Veículo BRA2E19 gravados no disco",
+    "evidencia": "Entrega LL-1602051, Rota ROT-2026-016 (status='concluida') e Veículo BRA2E19 gravados no disco",
     "arquivoOuEndpoint": "data/db.json, server/db.ts"
   },
   {

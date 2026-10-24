@@ -29,7 +29,8 @@ import {
   QrCode,
   UserPlus,
   Wine,
-  Flame
+  Flame,
+  CreditCard
 } from 'lucide-react';
 
 export interface TheXLogSidebarProps {
@@ -252,6 +253,14 @@ export const TheXLogSidebar: React.FC<TheXLogSidebarProps> = ({
           allowedRoles: ['master_owner', 'company_admin', 'operator', 'dispatcher', 'financial'],
           module: 'tabacaria',
           view: 'pos'
+        },
+        {
+          id: 'terminals',
+          label: 'Central de Maquininhas (POS)',
+          icon: CreditCard,
+          allowedRoles: ['master_owner', 'company_admin', 'operator', 'dispatcher', 'financial'],
+          module: 'adega',
+          view: 'terminals'
         }
       ]
     },

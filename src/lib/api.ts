@@ -27,7 +27,11 @@ import {
   CommercialCashSession,
   CommercialSupplier,
   CommercialPurchase,
-  CommercialDashboardMetrics
+  CommercialDashboardMetrics,
+  PixCharge,
+  CommercialTerminal,
+  CommercialTerminalTransaction,
+  TerminalReconciliationReport
 } from '../types';
 
 const TOKEN_KEY = 'logipredial_auth_token';
@@ -439,26 +443,26 @@ export const api = {
       body: JSON.stringify(data),
     }),
   getCurrentCashSession: (modulo?: 'adega' | 'tabacaria') =>
-    request<{ session: CommercialCashSession | null }>(modulo ? `/api/commerce/cash/current?modulo=${modulo}` : '/api/commerce/cash/current'),
-  openCashSession: (data: { saldoInicial: number; modulo?: 'adega' | 'tabacaria' }) =>
-    request<{ success: boolean; session: CommercialCashSession }>('/api/commerce/cash/open', {
+    request<{ success?: boolean; session: CommercialCashSession | null }>(modulo ? `/api/commerce/cash/current?modulo=${modulo}` : '/api/commerce/cash/current'),
+  openCashSession: (data: { saldoInicial: number; modulo: 'adega' | 'tabacaria' }) =>
+    request<{ success: boolean; message: string; session: CommercialCashSession }>('/api/commerce/cash/open', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  addCashMovement: (sessionId: string, data: { tipo: 'suprimento' | 'sangria'; valor: number; motivo: string }) =>
-    request<{ success: boolean; session: CommercialCashSession }>(`/api/commerce/cash/${sessionId}/movement`, {
+  addCashMovement: (sessionId: string, data: { tipo: 'suprimento' | 'sangria'; valor: number; motivo: string; autorizadoPor?: string }) =>
+    request<{ success: boolean; message: string; session: CommercialCashSession }>(`/api/commerce/cash/${sessionId}/movement`, {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  closeCashSession: (sessionId: string, data: { saldoContadoDinheiro: number; observacoes?: string }) =>
-    request<{ success: boolean; session: CommercialCashSession; diferenca: number }>(`/api/commerce/cash/${sessionId}/close`, {
+  closeCashSession: (sessionId: string, data: { saldoContadoDinheiro: number; observacoesFechamento?: string; observacoes?: string }) =>
+    request<{ success: boolean; message: string; session: CommercialCashSession; diferenca: number }>(`/api/commerce/cash/${sessionId}/close`, {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  getCashHistory: () =>
-    request<{ sessions: CommercialCashSession[] }>('/api/commerce/cash/history'),
+  getCashHistory: (modulo?: 'adega' | 'tabacaria') =>
+    request<{ success?: boolean; sessions: CommercialCashSession[] }>(modulo ? `/api/commerce/cash/history?modulo=${modulo}` : '/api/commerce/cash/history'),
   createCommerceSale: (data: {
-    modulo: 'adega' | 'tabacaria' | 'misto';
+    modulo: 'adega' | 'tabacaria';
     itens: { productId: string; quantidade: number; precoUnitario: number; desconto?: number }[];
     formaPagamento: 'dinheiro' | 'pix' | 'cartao_credito' | 'cartao_debito' | 'misto';
     valorPago?: number;
@@ -466,18 +470,48 @@ export const api = {
     clienteNome?: string;
     clienteDocumento?: string;
     verificacaoMaioridade: boolean;
+    detalhesPagamento?: any;
+    idempotencyKey?: string;
   }) =>
-    request<{ success: boolean; sale: CommercialSale }>('/api/commerce/sales', {
+    request<{ success: boolean; message: string; sale: CommercialSale }>('/api/commerce/sales', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
   getCommerceSales: (modulo?: 'adega' | 'tabacaria') =>
-    request<{ sales: CommercialSale[] }>(modulo ? `/api/commerce/sales?modulo=${modulo}` : '/api/commerce/sales'),
+    request<{ success?: boolean; sales: CommercialSale[] }>(modulo ? `/api/commerce/sales?modulo=${modulo}` : '/api/commerce/sales'),
   cancelCommerceSale: (id: string, data: { motivo: string }) =>
-    request<{ success: boolean; sale: CommercialSale }>(`/api/commerce/sales/${id}/cancel`, {
+    request<{ success: boolean; message: string; sale: CommercialSale }>(`/api/commerce/sales/${id}/cancel`, {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  // PIX Real Methods
+  generatePixCharge: (data: {
+    modulo: 'adega' | 'tabacaria';
+    valor: number;
+    descricao?: string;
+    itens?: any[];
+    clienteNome?: string;
+    clienteDocumento?: string;
+    idempotencyKey?: string;
+  }) =>
+    request<{ success: boolean; charge: PixCharge; providerStatus: any }>('/api/commerce/pix/charge', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getPixChargeStatus: (txid: string) =>
+    request<{ success: boolean; status: string; charge: PixCharge; providerStatus: any }>(`/api/commerce/pix/charge/${txid}`),
+  confirmPixManual: (data: { txid: string; comprovanteReferencia?: string }) =>
+    request<{ success: boolean; message: string; charge: PixCharge }>('/api/commerce/pix/confirm-manual', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  cancelPixCharge: (data: { txid: string; motivo?: string }) =>
+    request<{ success: boolean; message: string; charge: PixCharge }>('/api/commerce/pix/cancel', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getPixProviderInfo: () =>
+    request<{ success: boolean; provider: any }>('/api/commerce/pix/provider-info'),
   getCommerceSuppliers: () =>
     request<{ suppliers: CommercialSupplier[] }>('/api/commerce/suppliers'),
   createCommerceSupplier: (data: Partial<CommercialSupplier>) =>
@@ -501,6 +535,92 @@ export const api = {
     }),
   getCommerceDashboard: (modulo?: 'adega' | 'tabacaria') =>
     request<CommercialDashboardMetrics>(modulo ? `/api/commerce/dashboard?modulo=${modulo}` : '/api/commerce/dashboard'),
+
+  // Central de Integração de Maquininhas (POS / TEF)
+  getCommercialTerminals: (params?: { modulo?: string; ativo?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.modulo) q.set('modulo', params.modulo);
+    if (params?.ativo) q.set('ativo', params.ativo);
+    const qs = q.toString() ? `?${q.toString()}` : '';
+    return request<{ success: boolean; terminals: CommercialTerminal[] }>(`/api/commerce/terminals${qs}`);
+  },
+  createCommercialTerminal: (data: Partial<CommercialTerminal> & { credenciais?: any }) =>
+    request<{ success: boolean; message: string; terminal: CommercialTerminal }>('/api/commerce/terminals', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateCommercialTerminal: (id: string, data: Partial<CommercialTerminal> & { credenciais?: any }) =>
+    request<{ success: boolean; message: string; terminal: CommercialTerminal }>(`/api/commerce/terminals/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  deleteCommercialTerminal: (id: string) =>
+    request<{ success: boolean; message: string }>(`/api/commerce/terminals/${id}`, {
+      method: 'DELETE',
+    }),
+  testCommercialTerminal: (id: string) =>
+    request<{
+      success: boolean;
+      message: string;
+      terminalStatus: string;
+      batteryLevel?: number;
+      details?: any;
+      terminal: CommercialTerminal;
+    }>(`/api/commerce/terminals/${id}/test`, {
+      method: 'POST',
+    }),
+  createTerminalPaymentIntent: (
+    terminalId: string,
+    data: {
+      valor: number;
+      tipoOperacao: 'debito' | 'credito' | 'pix';
+      parcelas?: number;
+      modulo: 'adega' | 'tabacaria' | 'misto';
+      codigoVenda?: string;
+      caixaSessionId?: string;
+      idempotencyKey?: string;
+    }
+  ) =>
+    request<{
+      success: boolean;
+      transaction: CommercialTerminalTransaction;
+      message: string;
+    }>(`/api/commerce/terminals/${terminalId}/intent`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getTerminalPaymentIntentStatus: (intentId: string) =>
+    request<{
+      success: boolean;
+      transaction: CommercialTerminalTransaction;
+      status: string;
+      message?: string;
+    }>(`/api/commerce/terminals/intent/${intentId}/status`),
+  cancelTerminalPaymentIntent: (intentId: string) =>
+    request<{
+      success: boolean;
+      message: string;
+      transaction: CommercialTerminalTransaction;
+    }>(`/api/commerce/terminals/intent/${intentId}/cancel`, {
+      method: 'POST',
+    }),
+  getTerminalTransactions: (params?: { terminalId?: string; modulo?: string; status?: string; limit?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.terminalId) q.set('terminalId', params.terminalId);
+    if (params?.modulo) q.set('modulo', params.modulo);
+    if (params?.status) q.set('status', params.status);
+    if (params?.limit) q.set('limit', String(params.limit));
+    const qs = q.toString() ? `?${q.toString()}` : '';
+    return request<{ success: boolean; transactions: CommercialTerminalTransaction[]; total: number }>(`/api/commerce/terminals/transactions${qs}`);
+  },
+  getTerminalReconciliation: (params?: { modulo?: string; dataInicio?: string; dataFim?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.modulo) q.set('modulo', params.modulo);
+    if (params?.dataInicio) q.set('dataInicio', params.dataInicio);
+    if (params?.dataFim) q.set('dataFim', params.dataFim);
+    const qs = q.toString() ? `?${q.toString()}` : '';
+    return request<TerminalReconciliationReport>(`/api/commerce/terminals/reconciliation${qs}`);
+  },
 };
 
 // WhatsApp Sales helper generator

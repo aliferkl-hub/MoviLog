@@ -519,6 +519,7 @@ export interface CommercialProduct {
   codigoBarras?: string;
   nome: string;
   categoria: string;
+  classificacaoLegal?: 'sem_restricao' | 'bebida_alcoolica' | 'tabaco_derivados' | 'outro_restrito';
   descricao?: string;
   marca?: string;
   fornecedorId?: string;
@@ -590,6 +591,27 @@ export interface CommercialSale {
   criadoEm: string;
   canceladoEm?: string;
   canceladoPor?: string;
+  detalhesPagamento?: {
+    forma: 'dinheiro' | 'pix' | 'cartao_credito' | 'cartao_debito' | 'misto';
+    valorRecebido?: number;
+    troco?: number;
+    pixTxid?: string;
+    pixCopiaECola?: string;
+    pixConfirmadoEm?: string;
+    pixProvedor?: string;
+    metodoConfirmacao?: string;
+    cartaoBandeira?: string;
+    cartaoAutorizacao?: string;
+    confirmacaoManual?: boolean;
+    comprovanteReferencia?: string;
+    nsu?: string;
+    paymentIntentId?: string;
+    transactionId?: string;
+    terminalId?: string;
+    terminalNome?: string;
+    [key: string]: any;
+  };
+  idempotencyKey?: string;
 }
 
 export interface CashMovement {
@@ -617,12 +639,41 @@ export interface CommercialCashSession {
   totalVendasDinheiro: number;
   totalVendasPix: number;
   totalVendasCartao: number;
+  totalVendasCartaoDebito?: number;
+  totalVendasCartaoCredito?: number;
+  totalCancelamentosDinheiro?: number;
   totalVendasOutros: number;
   saldoEsperadoDinheiro: number;
   saldoContadoDinheiro?: number;
   diferenca?: number;
   observacoesFechamento?: string;
+  fechadoPorId?: string;
+  fechadoPorNome?: string;
   movimentacoesManuais: CashMovement[];
+}
+
+export interface PixCharge {
+  id: string;
+  companyId: string;
+  modulo: 'adega' | 'tabacaria' | 'misto';
+  txid: string;
+  valor: number;
+  chavePix: string;
+  beneficiario: string;
+  cidade: string;
+  copiaECola: string;
+  qrCodeDataUrl: string;
+  qrCodePayload?: string;
+  endToEndId?: string;
+  status: 'aguardando_pagamento' | 'pago' | 'expirado' | 'cancelado' | 'falhou';
+  provedor: 'bacen_estatico' | 'mercadopago' | 'efi' | 'manual';
+  criadoEm: string;
+  expiraEm: string;
+  confirmadoEm?: string;
+  confirmadoPor?: string;
+  metodoConfirmacao?: 'webhook_provedor' | 'conferencia_manual_operador' | 'consulta_api';
+  comprovanteReferencia?: string;
+  idempotencyKey?: string;
 }
 
 export interface CommercialSupplier {
@@ -665,6 +716,89 @@ export interface CommercialPurchase {
   criadoEm: string;
 }
 
+export type TerminalProvider = 'mercadopago_point' | 'stone_connect' | 'pagar_me' | 'smartpos_tef' | 'pos_manual';
+
+export interface CommercialTerminalCredentials {
+  mpAccessToken?: string;
+  mpPublicKey?: string;
+  stonePartnerKey?: string;
+  stoneSecretKey?: string;
+  stoneMerchantId?: string;
+  tefHost?: string;
+  tefPort?: number;
+  tefApiKey?: string;
+  webhookSecret?: string;
+}
+
+export interface CommercialTerminal {
+  id: string;
+  companyId: string;
+  nome: string;
+  provedor: TerminalProvider;
+  modelo: string;
+  tipoEquipamento: 'smart_pos' | 'pos_gprs' | 'tef_pinpad' | 'pos_manual';
+  identificadorProvedor: string;
+  serialNumber?: string;
+  modulo: 'adega' | 'tabacaria' | 'ambos';
+  caixaIdPadrao?: string;
+  padrao: boolean;
+  ativo: boolean;
+  statusConexao: 'online' | 'offline' | 'desconhecido';
+  ultimaSincronizacao?: string;
+  bateriaNivel?: number;
+  modoOperacao: 'cloud_api' | 'smart_pos_app' | 'tef_integrado' | 'manual_operador';
+  credenciais?: CommercialTerminalCredentials;
+  taxaDebitoPercentual?: number;
+  taxaCreditoPercentual?: number;
+  taxaPixPercentual?: number;
+  criadoEm: string;
+  atualizadoEm: string;
+  ultimoTesteEm?: string;
+  ultimoResultadoTeste?: {
+    sucesso: boolean;
+    mensagem: string;
+    detalhes?: any;
+    dataHora: string;
+  };
+}
+
+export type TerminalTransactionStatus = 'pendente' | 'processando' | 'aprovado' | 'recusado' | 'cancelado' | 'estornado' | 'falha_comunicacao';
+
+export interface CommercialTerminalTransaction {
+  id: string;
+  companyId: string;
+  terminalId: string;
+  terminalNome: string;
+  provedor: TerminalProvider;
+  modeloTerminal?: string;
+  modulo: 'adega' | 'tabacaria' | 'misto';
+  saleId?: string;
+  codigoVenda?: string;
+  caixaSessionId?: string;
+  tipoOperacao: 'debito' | 'credito' | 'pix';
+  bandeira?: string;
+  ultimosDigitosCartao?: string;
+  valorBruto: number;
+  taxaPercentualAplicada: number;
+  valorTaxaEstimada: number;
+  valorLiquido: number;
+  status: TerminalTransactionStatus;
+  nsu?: string;
+  codigoAutorizacao?: string;
+  paymentIntentId?: string;
+  externalReference?: string;
+  mensagemProvedor?: string;
+  detalhesTecnicos?: any;
+  criadoEm: string;
+  concluidoEm?: string;
+  canceladoEm?: string;
+  estornadoEm?: string;
+  conciliado: boolean;
+  conciliadoEm?: string;
+  divergenciaConciliacao?: string;
+  idempotencyKey?: string;
+}
+
 export interface DatabaseSchema {
   users: User[];
   companies: Company[];
@@ -693,6 +827,9 @@ export interface DatabaseSchema {
   commercialCashSessions: CommercialCashSession[];
   commercialSuppliers: CommercialSupplier[];
   commercialPurchases: CommercialPurchase[];
+  pixCharges: PixCharge[];
+  commercialTerminals: CommercialTerminal[];
+  commercialTerminalTransactions: CommercialTerminalTransaction[];
 }
 
 // Default Seed Data
@@ -867,12 +1004,38 @@ class Database {
           fiscalDocuments: parsed.fiscalDocuments || [],
           financialRecords: parsed.financialRecords || [],
           notifications: parsed.notifications || [],
-          commercialProducts: parsed.commercialProducts || [],
+          commercialProducts: (parsed.commercialProducts || []).map((p: any) => {
+            if (!p.classificacaoLegal) {
+              const cat = (p.categoria || '').toLowerCase();
+              const nome = (p.nome || '').toLowerCase();
+              if (
+                cat.includes('cerveja') || cat.includes('vinho') || cat.includes('destilad') ||
+                nome.includes('cerveja') || nome.includes('vinho') || nome.includes('vodka') ||
+                nome.includes('whisky') || nome.includes('gin') || nome.includes('cachaça')
+              ) {
+                p.classificacaoLegal = 'bebida_alcoolica';
+                p.idadeMinima = 18;
+              } else if (
+                cat.includes('tabaco') || cat.includes('charuto') || cat.includes('cigarro') ||
+                nome.includes('tabaco') || nome.includes('charuto') || nome.includes('cigarro') || nome.includes('palheiro')
+              ) {
+                p.classificacaoLegal = 'tabaco_derivados';
+                p.idadeMinima = 18;
+              } else {
+                p.classificacaoLegal = 'sem_restricao';
+                p.idadeMinima = 0;
+              }
+            }
+            return p;
+          }),
           commercialStockMovements: parsed.commercialStockMovements || [],
           commercialSales: parsed.commercialSales || [],
           commercialCashSessions: parsed.commercialCashSessions || [],
           commercialSuppliers: parsed.commercialSuppliers || [],
-          commercialPurchases: parsed.commercialPurchases || []
+          commercialPurchases: parsed.commercialPurchases || [],
+          pixCharges: parsed.pixCharges || [],
+          commercialTerminals: parsed.commercialTerminals || [],
+          commercialTerminalTransactions: parsed.commercialTerminalTransactions || []
         };
       } catch (err) {
         console.error('Error loading db.json, attempting backup_db.json fallback:', err);
@@ -908,7 +1071,10 @@ class Database {
               commercialSales: parsedBackup.commercialSales || [],
               commercialCashSessions: parsedBackup.commercialCashSessions || [],
               commercialSuppliers: parsedBackup.commercialSuppliers || [],
-              commercialPurchases: parsedBackup.commercialPurchases || []
+              commercialPurchases: parsedBackup.commercialPurchases || [],
+              pixCharges: parsedBackup.pixCharges || [],
+              commercialTerminals: parsedBackup.commercialTerminals || [],
+              commercialTerminalTransactions: parsedBackup.commercialTerminalTransactions || []
             };
           } catch (backupErr) {
             console.error('Falha ao carregar backup_db.json:', backupErr);
@@ -943,7 +1109,10 @@ class Database {
       commercialSales: [],
       commercialCashSessions: [],
       commercialSuppliers: [],
-      commercialPurchases: []
+      commercialPurchases: [],
+      pixCharges: [],
+      commercialTerminals: [],
+      commercialTerminalTransactions: []
     };
     this.saveData(initial);
     return initial;
@@ -993,6 +1162,9 @@ class Database {
   public get commercialCashSessions() { return this.data.commercialCashSessions; }
   public get commercialSuppliers() { return this.data.commercialSuppliers; }
   public get commercialPurchases() { return this.data.commercialPurchases; }
+  public get pixCharges() { return this.data.pixCharges; }
+  public get commercialTerminals() { return this.data.commercialTerminals; }
+  public get commercialTerminalTransactions() { return this.data.commercialTerminalTransactions; }
 
   public logAudit(log: Omit<AuditLog, 'id' | 'timestamp'>): void {
     const entry: AuditLog = {

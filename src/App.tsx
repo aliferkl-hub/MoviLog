@@ -96,6 +96,9 @@ const DashboardContent: React.FC = () => {
     } else if (module === 'settings') {
       targetModule = 'master';
       targetView = 'settings';
+    } else if (module === 'terminals' || module === 'maquininhas') {
+      targetModule = 'adega';
+      targetView = 'terminals';
     }
 
     setCurrentModule(targetModule);

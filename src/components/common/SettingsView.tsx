@@ -12,11 +12,14 @@ import {
   ShieldCheck,
   Calendar,
   Layers,
-  Sparkles
+  Sparkles,
+  CreditCard
 } from 'lucide-react';
+import { TerminalsIntegrationView } from '../commerce/TerminalsIntegrationView';
 
 export const SettingsView: React.FC = () => {
   const { company, isMaster, refreshUser, isDemo, demoDaysLeft } = useAuth();
+  const [activeTab, setActiveTab] = useState<'geral' | 'maquininhas'>('geral');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -108,7 +111,37 @@ export const SettingsView: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Sub-tabs: Dados da Empresa vs Pagamentos > Minhas Maquininhas */}
+      <div className="flex items-center gap-2 border-b border-[#2D2644] pb-2 overflow-x-auto">
+        <button
+          onClick={() => setActiveTab('geral')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition shrink-0 ${
+            activeTab === 'geral'
+              ? 'bg-[#8B5CF6] text-white shadow-lg shadow-[#8B5CF6]/30'
+              : 'text-[#AAA6B5] hover:text-white hover:bg-[#121024]'
+          }`}
+        >
+          <Building className="w-4 h-4" />
+          <span>Dados da Empresa & Limites</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('maquininhas')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition shrink-0 ${
+            activeTab === 'maquininhas'
+              ? 'bg-[#8B5CF6] text-white shadow-lg shadow-[#8B5CF6]/30'
+              : 'text-[#AAA6B5] hover:text-white hover:bg-[#121024]'
+          }`}
+        >
+          <CreditCard className="w-4 h-4 text-emerald-400" />
+          <span>Configurações &gt; Pagamentos &gt; Minhas Maquininhas</span>
+        </button>
+      </div>
+
+      {activeTab === 'maquininhas' ? (
+        <TerminalsIntegrationView initialModulo="ambos" />
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Main Settings Form */}
         <div className="lg:col-span-2 bg-[#121024] border border-[#2D2644] rounded-3xl p-6 sm:p-8 shadow-xl">
           {saved && (
@@ -303,6 +336,7 @@ export const SettingsView: React.FC = () => {
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 };

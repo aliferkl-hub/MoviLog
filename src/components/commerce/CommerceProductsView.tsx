@@ -80,6 +80,11 @@ export const CommerceProductsView: React.FC<CommerceProductsViewProps> = ({ modu
     unidade: 'un',
     fotoUrl: '',
     idadeMinima: '18',
+    classificacaoLegal: (modulo === 'adega' ? 'bebida_alcoolica' : 'tabaco_derivados') as
+      | 'sem_restricao'
+      | 'bebida_alcoolica'
+      | 'tabaco_derivados'
+      | 'outro_restrito',
     ativo: true
   });
 
@@ -109,6 +114,7 @@ export const CommerceProductsView: React.FC<CommerceProductsViewProps> = ({ modu
   // Open modal for Create
   const handleOpenCreate = () => {
     setEditingProduct(null);
+    const initialClassificacao = modulo === 'adega' ? 'bebida_alcoolica' : 'tabaco_derivados';
     setFormData({
       nome: '',
       sku: `${modulo === 'adega' ? 'ADG' : 'TAB'}-${Date.now().toString().slice(-5)}`,
@@ -124,6 +130,7 @@ export const CommerceProductsView: React.FC<CommerceProductsViewProps> = ({ modu
       unidade: 'un',
       fotoUrl: '',
       idadeMinima: '18',
+      classificacaoLegal: initialClassificacao,
       ativo: true
     });
     setIsModalOpen(true);
@@ -132,6 +139,7 @@ export const CommerceProductsView: React.FC<CommerceProductsViewProps> = ({ modu
   // Open modal for Edit
   const handleOpenEdit = (p: CommercialProduct) => {
     setEditingProduct(p);
+    const classif = p.classificacaoLegal || (p.idadeMinima >= 18 ? (modulo === 'adega' ? 'bebida_alcoolica' : 'tabaco_derivados') : 'sem_restricao');
     setFormData({
       nome: p.nome,
       sku: p.sku,
@@ -147,6 +155,7 @@ export const CommerceProductsView: React.FC<CommerceProductsViewProps> = ({ modu
       unidade: p.unidade,
       fotoUrl: p.fotoUrl || '',
       idadeMinima: p.idadeMinima.toString(),
+      classificacaoLegal: classif,
       ativo: p.ativo
     });
     setIsModalOpen(true);
@@ -179,7 +188,8 @@ export const CommerceProductsView: React.FC<CommerceProductsViewProps> = ({ modu
         estoqueMinimo: Math.max(0, parseInt(formData.estoqueMinimo) || 0),
         unidade: formData.unidade.trim() || 'un',
         fotoUrl: formData.fotoUrl.trim() || undefined,
-        idadeMinima: parseInt(formData.idadeMinima) || 0,
+        idadeMinima: formData.classificacaoLegal === 'sem_restricao' ? 0 : 18,
+        classificacaoLegal: formData.classificacaoLegal,
         ativo: formData.ativo
       };
 
@@ -380,11 +390,26 @@ export const CommerceProductsView: React.FC<CommerceProductsViewProps> = ({ modu
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-2">
                           <div>
-                            <p className="font-bold text-white flex items-center gap-1.5">
-                              {p.nome}
-                              {p.idadeMinima >= 18 && (
-                                <span className="text-[9px] font-bold text-amber-400 bg-amber-400/10 px-1 rounded">
-                                  +18
+                            <p className="font-bold text-white flex items-center gap-1.5 flex-wrap">
+                              <span>{p.nome}</span>
+                              {p.classificacaoLegal === 'bebida_alcoolica' && (
+                                <span className="text-[9px] font-bold text-amber-400 bg-amber-400/10 border border-amber-400/30 px-1.5 py-0.5 rounded">
+                                  +18 Álcool
+                                </span>
+                              )}
+                              {p.classificacaoLegal === 'tabaco_derivados' && (
+                                <span className="text-[9px] font-bold text-orange-400 bg-orange-400/10 border border-orange-400/30 px-1.5 py-0.5 rounded">
+                                  +18 Tabaco
+                                </span>
+                              )}
+                              {p.classificacaoLegal === 'outro_restrito' && (
+                                <span className="text-[9px] font-bold text-purple-400 bg-purple-400/10 border border-purple-400/30 px-1.5 py-0.5 rounded">
+                                  +18 Restrito
+                                </span>
+                              )}
+                              {(!p.classificacaoLegal || p.classificacaoLegal === 'sem_restricao') && p.idadeMinima === 0 && (
+                                <span className="text-[9px] font-semibold text-emerald-400 bg-emerald-400/10 border border-emerald-400/30 px-1.5 py-0.5 rounded">
+                                  Livre
                                 </span>
                               )}
                             </p>
@@ -641,19 +666,41 @@ export const CommerceProductsView: React.FC<CommerceProductsViewProps> = ({ modu
                   </select>
                 </div>
 
-                {/* Idade Mínima (+18 check) */}
-                <div>
+                {/* Classificação Legal & Restrição de Idade */}
+                <div className="sm:col-span-2">
                   <label className="text-xs font-semibold text-[#AAA6B5] mb-1 block">
-                    Classificação Etária Legal
+                    Classificação Legal & Restrição Etária *
                   </label>
                   <select
-                    value={formData.idadeMinima}
-                    onChange={e => setFormData({ ...formData, idadeMinima: e.target.value })}
+                    value={formData.classificacaoLegal}
+                    onChange={e => {
+                      const val = e.target.value as any;
+                      setFormData({
+                        ...formData,
+                        classificacaoLegal: val,
+                        idadeMinima: val === 'sem_restricao' ? '0' : '18'
+                      });
+                    }}
                     className="w-full bg-[#0A0714] border border-[#262042] rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#8B5CF6]"
                   >
-                    <option value="18">Restrito a Maiores de 18 anos (+18)</option>
-                    <option value="0">Livre para todas as idades (Água, Refrigerante, etc)</option>
+                    <option value="sem_restricao">
+                      Sem restrição de idade — Venda Livre (Sedas, Filtros, Piteiras, Dichavadores, Cinzeiros, Isqueiros, Água, Bebidas não alcoólicas)
+                    </option>
+                    <option value="bebida_alcoolica">
+                      Bebida Alcoólica (+18 anos — Lei Federal nº 13.106/2015)
+                    </option>
+                    <option value="tabaco_derivados">
+                      Tabaco e Derivados (+18 anos — Lei Federal nº 9.294/1996 e ECA Lei 8.069/90)
+                    </option>
+                    <option value="outro_restrito">
+                      Outro Produto de Controle Restrito (+18 anos)
+                    </option>
                   </select>
+                  <p className="text-[10px] text-[#716A86] mt-1">
+                    {formData.classificacaoLegal === 'sem_restricao'
+                      ? '✅ Venda livre no PDV sem exigir verificação de maioridade no carrinho.'
+                      : '⚠️ Exige conferência e confirmação de maioridade legal (+18 anos) antes da conclusão da venda.'}
+                  </p>
                 </div>
 
                 {/* Status Ativo */}

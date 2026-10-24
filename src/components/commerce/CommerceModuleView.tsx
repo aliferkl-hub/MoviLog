@@ -6,6 +6,7 @@ import { CommerceStockView } from './CommerceStockView';
 import { CommerceCashView } from './CommerceCashView';
 import { CommercePurchasesView } from './CommercePurchasesView';
 import { CommerceDashboardView } from './CommerceDashboardView';
+import { TerminalsIntegrationView } from './TerminalsIntegrationView';
 import {
   Wine,
   Flame,
@@ -15,7 +16,8 @@ import {
   Wallet,
   Truck,
   BarChart3,
-  ArrowRightLeft
+  ArrowRightLeft,
+  CreditCard
 } from 'lucide-react';
 
 interface CommerceModuleViewProps {
@@ -30,12 +32,12 @@ export const CommerceModuleView: React.FC<CommerceModuleViewProps> = ({
   onNavigate
 }) => {
   const { user } = useAuth();
-  const [currentTab, setCurrentTab] = useState<'pos' | 'products' | 'stock' | 'cash' | 'purchases' | 'dashboard'>(
+  const [currentTab, setCurrentTab] = useState<'pos' | 'products' | 'stock' | 'cash' | 'purchases' | 'dashboard' | 'terminals'>(
     (activeView as any) || 'pos'
   );
 
   useEffect(() => {
-    if (activeView && ['pos', 'products', 'stock', 'cash', 'purchases', 'dashboard'].includes(activeView)) {
+    if (activeView && ['pos', 'products', 'stock', 'cash', 'purchases', 'dashboard', 'terminals'].includes(activeView)) {
       setCurrentTab(activeView as any);
     }
   }, [activeView]);
@@ -47,6 +49,7 @@ export const CommerceModuleView: React.FC<CommerceModuleViewProps> = ({
     { id: 'products', label: 'Produtos & Preços', icon: Package },
     { id: 'stock', label: 'Estoque & Baixas', icon: Boxes },
     { id: 'cash', label: 'Caixa & Fechamento', icon: Wallet },
+    { id: 'terminals', label: 'Minhas Maquininhas', icon: CreditCard },
     { id: 'purchases', label: 'Compras & Fornecedores', icon: Truck },
     { id: 'dashboard', label: 'Indicadores & Relatórios', icon: BarChart3 }
   ];
@@ -150,6 +153,16 @@ export const CommerceModuleView: React.FC<CommerceModuleViewProps> = ({
 
         {currentTab === 'cash' && (
           <CommerceCashView modulo={modulo} />
+        )}
+
+        {currentTab === 'terminals' && (
+          <TerminalsIntegrationView
+            initialModulo={modulo}
+            onNavigateToPOS={(m) => {
+              setCurrentTab('pos');
+              onNavigate(m, 'pos');
+            }}
+          />
         )}
 
         {currentTab === 'purchases' && (
